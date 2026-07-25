@@ -397,10 +397,13 @@ function stepFX(){
 
 // ---------- Rendering ----------
 const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+let RES=1;   // render scale: canvas backing store = world size × RES (display size × devicePixelRatio, capped)
 let skyCache=null;
 function buildSky(){
-  skyCache=document.createElement('canvas'); skyCache.width=W; skyCache.height=H;
+  skyCache=document.createElement('canvas');
+  skyCache.width=Math.max(1,Math.round(W*RES)); skyCache.height=Math.max(1,Math.round(H*RES));
   const c=skyCache.getContext('2d');
+  c.scale(RES,RES);
   const g=c.createLinearGradient(0,0,0,H); g.addColorStop(0,theme.skyTop); g.addColorStop(1,theme.skyBot);
   c.fillStyle=g; c.fillRect(0,0,W,H);
   // stars for darker skies
@@ -475,7 +478,7 @@ function drawDeco(x){
   ctx.restore();
 }
 function drawTerrain(){
-  ctx.drawImage(skyCache,0,0);
+  ctx.drawImage(skyCache,0,0,W,H);
   drawClouds();
   const [top,mid,deep]=theme.ground;
   ctx.beginPath(); ctx.moveTo(0,H);
@@ -937,8 +940,9 @@ function frame(ts){
   let n=0;
   while(acc>=16.667 && n<4){ stepGame(); acc-=16.667; n++; }
   if(n===4) acc=0;   // slow device: drop backlog rather than spiral
-  // render
+  // render (all drawing in world coords; RES maps them onto the hi-dpi backing store)
   ctx.save();
+  ctx.setTransform(RES,0,0,RES,0,0);
   if(shake>0) ctx.translate(frange(-shake,shake),frange(-shake,shake));
   drawTerrain();
   if(G.roundActive) for(const t of G.players) if(t.alive) drawTank(t);
@@ -1597,6 +1601,13 @@ function fitCanvas(){
   const bw=box.clientWidth, bh=box.clientHeight;
   const s=Math.min(bw/W, bh/H);
   canvas.style.width=(W*s)+'px'; canvas.style.height=(H*s)+'px';
+  // hi-dpi: back the canvas with real device pixels (crisp text/graphics on 4K)
+  const newRes=clamp(s*(window.devicePixelRatio||1), 0.5, 2.5);
+  if(Math.abs(newRes-RES)>0.01){
+    RES=newRes;
+    canvas.width=Math.round(W*RES); canvas.height=Math.round(H*RES);
+    if(skyCache) buildSky();
+  }
 }
 window.addEventListener('resize',fitCanvas);
 
@@ -1606,7 +1617,7 @@ showOnly('menuScreen');
 hide('hud');
 // idle backdrop: pre-generate a scene so the menu has something pretty behind it
 genTerrain('random', 42); buildSky();
-(function idleDraw(){ if(G) return; drawTerrain(); requestAnimationFrame(idleDraw); })();
+(function idleDraw(){ if(G) return; ctx.setTransform(RES,0,0,RES,0,0); drawTerrain(); requestAnimationFrame(idleDraw); })();
 requestAnimationFrame(frame);
 </script>
 </body>
