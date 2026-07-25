@@ -230,6 +230,10 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
       <button class="hudbtn" id="movLeft">◀</button><span class="val" id="fuelVal">100</span><button class="hudbtn" id="movRight">▶</button>
     </div>
     <div class="hudgroup"><span class="lab">Weapon</span><select id="weaponSel"></select></div>
+    <div class="hudgroup"><span class="lab">Items</span>
+      <button class="hudbtn" id="btnTeleport" title="Teleport to a random spot">🌀<span id="tpCount">0</span></button>
+      <button class="hudbtn" id="btnRepair" title="Field repair: +35 HP">🔧<span id="rpCount">0</span></button>
+    </div>
     <button id="fireBtn">FIRE!</button>
   </div>
 </div>
@@ -304,6 +308,8 @@ const WEAPONS = {
 };
 const GEAR = {
   parachute:{name:'Parachutes ×3', icon:'🪂', price:5000,  desc:'Auto-deploys, prevents fall damage', give:p=>p.chutes+=3},
+  teleport :{name:'Teleporter',    icon:'🌀', price:6000,  desc:'Warp to a random spot — use on your turn', give:p=>p.teleports+=1},
+  repair   :{name:'Repair Kit',    icon:'🔧', price:3500,  desc:'+35 HP field repair — use on your turn',   give:p=>p.repairs+=1},
   fuel     :{name:'Fuel Tank +100',icon:'⛽', price:1800,  desc:'More moves this & future rounds',    give:p=>p.fuelBonus+=100},
   shield1  :{name:'Shield',        icon:'🛡️', price:5000,  desc:'+50 shield at round start',          give:p=>p.shieldBuy=Math.max(p.shieldBuy,50)},
   shield2  :{name:'Heavy Shield',  icon:'🔰', price:12000, desc:'+110 shield at round start',         give:p=>p.shieldBuy=Math.max(p.shieldBuy,110)},
@@ -424,16 +430,25 @@ function genClouds(){
     }
     // one wide soft belly filling the base
     puffs.push({dx:px/2, dy:-6*scale, r:(px/2+30)*scale*0.85, belly:true});
-    clouds.push({x0:frand()*(W+500), y:frange(36,H*0.36), w:px, speed:frange(0.10,0.32)*(frand()<0.5?1:1.4),
+    clouds.push({x:frand()*(W+500)-250, y:frange(36,H*0.36), w:px,
+      par:scale*frange(0.75,1.15),                 // parallax: big/near clouds ride the wind faster
       phase:frange(0,6.28), alpha:frange(0.55,0.8), puffs});
   }
 }
+let lastCloudMs=0;
 function drawClouds(){
-  const t=performance.now()/1000, night=themeName!=='forest';
+  const now=performance.now(), night=themeName!=='forest';
+  const dt = lastCloudMs? Math.min(3,(now-lastCloudMs)/16.67) : 1;
+  lastCloudMs=now;
+  // clouds ride the wind: direction and speed track the current turn's wind
+  const wind = G && G.state!=='idle' ? G.wind : WIND_MAX*0.33;
   for(const c of clouds){
+    c.x += (wind*30 + 0.015*Math.sign(wind||1)) * c.par * dt;
     const span=W+500+c.w;
-    const x=-250-c.w + ((c.x0 + t*60*c.speed) % span + span) % span;
-    const y=c.y + Math.sin(t*0.22+c.phase)*5;
+    if(c.x > W+250) c.x -= span;
+    if(c.x < -250-c.w) c.x += span;
+    const x=c.x;
+    const y=c.y + Math.sin(now/1000*0.22+c.phase)*5;
     ctx.globalAlpha=c.alpha;
     for(const p of c.puffs){
       const cy2=y+p.dy, sq=p.belly?0.55:0.9;   // belly puff is squashed wide
@@ -478,7 +493,7 @@ function makePlayer(cfg,i){
     peerId:cfg.peerId||null,           // owner connection (online)
     x:0, y:0, angle: i%2? 135:45, power:60,
     hp:BASE_HP, maxHp:BASE_HP, shield:0, shieldBuy:0,
-    fuel:BASE_FUEL, fuelBonus:0, chutes:0, armor:0,
+    fuel:BASE_FUEL, fuelBonus:0, chutes:1, armor:0, teleports:0, repairs:0,
     cash:0, score:0, kills:0, dmgDealt:0,
     ammo:{missile:Infinity, bigshot:0, shower:0, volcano:0, digger:0, atom:0, strike:0},
     weapon:'missile', alive:true, falling:false, fallStart:0, chuteOn:false,
@@ -693,6 +708,37 @@ function stepTanks(){
       t.chuteOn=false;
     } else if(!t.falling && t.y>gy){ t.y=gy; }
   }
+}
+// ---------- Turn items (teleport / repair) ----------
+function applyItem(pi,kind){
+  const p=G.players[pi]; if(!p||!p.alive) return;
+  if(kind==='tp' && p.teleports>0){
+    p.teleports--;
+    addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
+    let nx=p.x;
+    for(let i=0;i<24;i++){                                  // deterministic: uses the sim RNG
+      const cand=Math.round(srange(50,W-50));
+      if(G.players.every(o=>!o.alive||o===p||Math.abs(o.x-cand)>70)){ nx=cand; break; }
+    }
+    p.x=nx; flattenUnder(p); p.y=groundY(nx); p.falling=false; p.vy=0;
+    addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
+    floater(p.x,p.y-44,'🌀 teleported','#9fe8ff');
+    AudioFX.beep();
+  } else if(kind==='rp' && p.repairs>0 && p.hp<p.maxHp){
+    p.repairs--;
+    const heal=Math.min(35,p.maxHp-p.hp); p.hp+=heal;
+    addParticles(p.x,p.y-14,14,{cols:['#8fd18a','#c9eec4'],sp0:0.5,sp1:2,l0:20,l1:40,s0:1.5,s1:3,grav:-0.05});
+    floater(p.x,p.y-40,'🔧 +'+heal,'#7fb069');
+    AudioFX.beep();
+  }
+  updateHUD();
+}
+function useItem(kind){
+  const p=localControl(); if(!p) return;
+  if(kind==='tp' && p.teleports<=0) return;
+  if(kind==='rp' && (p.repairs<=0 || p.hp>=p.maxHp)) return;
+  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind});
+  applyItem(p.id,kind);
 }
 function anyMotion(){
   return G.proj.length>0 || G.plane || G.players.some(t=>t.alive&&t.falling);
@@ -948,6 +994,14 @@ function updateHUD(){
   const mine = isMyTurn() || (G.mode==='local' && !isBot(p) && G.state==='aim');
   for(const id of ['angDown','angUp','powDown','powUp','movLeft','movRight','fireBtn','weaponSel'])
     $(id).disabled=!mine;
+  // items: show the controllable player's stock
+  const me = G.mode==='online' ? G.players.find(pp=>pp.peerId===NET.myId) : p;
+  if(me){
+    $('tpCount').textContent=me.teleports;
+    $('rpCount').textContent=me.repairs;
+    $('btnTeleport').disabled = !mine || me.teleports<=0;
+    $('btnRepair').disabled = !mine || me.repairs<=0 || me.hp>=me.maxHp;
+  }
 }
 function localControl(){ // player object the local user may steer right now
   if(!G||G.state!=='aim')return null;
@@ -979,6 +1033,8 @@ holdable('powUp',()=>adjPower(1)); holdable('powDown',()=>adjPower(-1));
 holdable('movLeft',()=>{const p=localControl(); if(p){tryMove(p,-1); netAim(p);} });
 holdable('movRight',()=>{const p=localControl(); if(p){tryMove(p,1); netAim(p);} });
 $('fireBtn').addEventListener('click',()=>{AudioFX.unlock(); fireLocal();});
+$('btnTeleport').addEventListener('click',()=>{AudioFX.unlock(); useItem('tp');});
+$('btnRepair').addEventListener('click',()=>{AudioFX.unlock(); useItem('rp');});
 $('weaponSel').addEventListener('change',e=>{const p=localControl(); if(p){p.weapon=e.target.value; updateHUD(); }});
 
 // keyboard
@@ -1085,6 +1141,8 @@ function renderShop(p){
     const g=GEAR[k];
     let ownTxt='';
     if(k==='parachute')ownTxt=`Owned: ${p.chutes}`;
+    if(k==='teleport')ownTxt=`Owned: ${p.teleports}`;
+    if(k==='repair')ownTxt=`Owned: ${p.repairs}`;
     if(k==='fuel')ownTxt=`Bonus: +${p.fuelBonus}`;
     if(k==='shield1'||k==='shield2')ownTxt=p.shieldBuy?`Equipped: ${p.shieldBuy} shield`:'None equipped';
     if(k==='energy')ownTxt=`Max HP: ${p.maxHp}`;
@@ -1138,12 +1196,14 @@ function botShop(p){
     if(p.cash>=38000) buy('strike','w');
     if(p.cash>=15000) buy('atom','w');
     buy('shield2','g'); buy('energy','g');
+    if(p.repairs<1) buy('repair','g');
     while(p.cash>=8000 && p.ammo.bigshot<8) buy('bigshot','w');
     if(p.cash>=6000) buy('volcano','w');
     if(p.chutes<1) buy('parachute','g');
   } else if(med){
     if(p.cash>=20000) buy('atom','w');
     buy('shield1','g');
+    if(p.cash>=9000 && p.repairs<1) buy('repair','g');
     while(p.cash>=6000 && p.ammo.bigshot<5) buy('bigshot','w');
     if(p.cash>=4000) buy('shower','w');
   } else {
@@ -1224,6 +1284,11 @@ function botChooseWeapon(p,target,aimScore){
 }
 function botTakeTurn(p){
   if(!G || G.state!=='aim' || G.players[G.turn]!==p || !p.alive) return;
+  // field repair when hurt
+  if(p.repairs>0 && p.hp < p.maxHp*0.5){
+    if(G.mode==='online') NET.send({t:'item',pi:p.id,kind:'rp'});
+    applyItem(p.id,'rp');
+  }
   const target=botPickTarget(p);
   if(!target){ return; }
   let aim, noiseA, noiseP;
@@ -1379,6 +1444,7 @@ const NET = {
         if(G.state==='shot'){ this.pendingSync=d; } else applySync(d);
         break; }
       case 'skip': if(!this.isHost) applySkip(); break;
+      case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind); break;
       case 'buy': applyPurchase(d.pi,d.k,d.cat); if(this.isHost) this.send(d,conn); break;
       case 'shopdone': shopReady.add(d.pi); if(this.isHost){ this.send(d,conn); maybeAllReady(); } break;
       case 'nextround': nextRoundStart(); break;

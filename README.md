@@ -41,7 +41,9 @@ Everything also works with the on-screen buttons (touch-friendly).
 
 Missile (free, unlimited) · Big Missile · Shower (splits into 6 at the apex) · Volcano Bomb (erupts into 9 fragments) · Digger (tunnels deep before exploding) · Atom Bomb · Air Strike (plane drops 5 bombs on your marker).
 
-Gear: shields, parachutes, extra fuel, energy cells (+max HP), composite armor (damage reduction).
+Gear: shields, parachutes, teleporters, repair kits, extra fuel, energy cells (+max HP), composite armor (damage reduction).
+
+Every tank starts the match with one free parachute — it auto-deploys on long falls (like getting the ground blown out from under you) and prevents fall damage. Buy more in the Armory. Teleporters warp you to a random spot and repair kits patch +35 HP; both are used on your turn from the Items buttons in the HUD, and neither ends your turn.
 
 You earn cash for every point of damage ($15/hp), kills ($2,000), surviving a round ($1,500), and winning it ($5,000).
 
