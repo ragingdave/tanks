@@ -202,6 +202,7 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
           <div class="small" id="shopSub"></div>
         </div>
         <div id="shopItems"></div>
+        <div id="shopReadyList" class="lobbyList"></div>
         <button class="big primary" id="btnShopDone">Ready ➜</button>
         <div id="shopWait" class="small hidden" style="text-align:center; margin-top:8px">Waiting for other players…</div>
       </div>
@@ -327,13 +328,16 @@ let terrain = new Float32Array(W);    // ground height from bottom
 let theme = THEMES.forest, themeName='forest';
 let decos = [];                        // {x, type, seed}
 
-function genTerrain(name){
-  themeName = name==='random' ? ['desert','forest','mountain'][Math.floor(srand()*3)] : name;
+function genTerrain(name, seed){
+  // Dedicated RNG seeded per round: terrain is a pure function of (map, seed),
+  // immune to any drift in the shared sim RNG — every client builds the same map.
+  const r = mulberry32((seed>>>0)||1);
+  const rr = (a,b)=>a + r()*(b-a);
+  themeName = name==='random' ? ['desert','forest','mountain'][Math.floor(r()*3)] : name;
   theme = THEMES[themeName];
-  // layered smooth noise via random midpoint-ish sine stacking (deterministic via simRng)
   const layers=[], nL=5;
-  for(let i=0;i<nL;i++) layers.push({f:srange(0.5,1.5)*(i+1)*1.4/W*Math.PI*2, ph:srange(0,Math.PI*2), amp:theme.hills/(i*1.15+1)});
-  const base = srange(0.24,0.34)*H;
+  for(let i=0;i<nL;i++) layers.push({f:rr(0.5,1.5)*(i+1)*1.4/W*Math.PI*2, ph:rr(0,Math.PI*2), amp:theme.hills/(i*1.15+1)});
+  const base = rr(0.24,0.34)*H;
   for(let x=0;x<W;x++){
     let h=base;
     for(const L of layers) h += Math.sin(x*L.f+L.ph)*L.amp*theme.rough;
@@ -342,8 +346,8 @@ function genTerrain(name){
   // gentle smoothing
   for(let k=0;k<2;k++){ for(let x=1;x<W-1;x++) terrain[x]=(terrain[x-1]+terrain[x]*2+terrain[x+1])/4; }
   decos=[];
-  const n = 10+Math.floor(srand()*8);
-  for(let i=0;i<n;i++) decos.push({x:Math.floor(srange(20,W-20)), seed:srand()});
+  const n = 10+Math.floor(r()*8);
+  for(let i=0;i<n;i++) decos.push({x:Math.floor(rr(20,W-20)), seed:r()});
 }
 function groundY(x){ x=clamp(Math.round(x),0,W-1); return H - terrain[x]; }
 
@@ -509,20 +513,28 @@ function newMatch(cfgPlayers, opts){
     round:1, rounds:opts.rounds||3,
     map:opts.map||'random',
     turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|over
-    proj:[], pendingBombs:[], turnTimer:0, shotBy:-1,
-    seed:opts.seed,
+    proj:[], pendingBombs:[], turnDeadline:0, shotBy:-1,
+    seed:opts.seed, roundActive:false, pendingFirstRound:true,
   };
   for(const p of G.players) p.cash = opts.cash||0;
-  startRound();
+  openShopPhase();                 // pre-match armory: spend starting cash before round 1
 }
 function startRound(){
-  genTerrain(G.map); buildSky();
+  // Everything round-defining comes from a per-round RNG derived only from
+  // (match seed, round number) — identical on every client, no drift possible.
+  const rr = mulberry32(((G.seed>>>0) + G.round*1000003)>>>0);
+  const rrange=(a,b)=>a+rr()*(b-a);
+  genTerrain(G.map, Math.floor(rr()*1e9));
+  buildSky();
+  G.windRng = mulberry32(((G.seed>>>0) ^ (G.round*7919))>>>0);
+  G.wind = (G.windRng()*2-1)*WIND_MAX*0.6;
+  G.roundActive = true;
   const ps=G.players, n=ps.length;
   // spawn spread across map, deterministic
   const order=[...ps].sort((a,b)=>a.id-b.id);
   const margin=110, span=(W-2*margin)/(n-1||1);
   order.forEach((p,i)=>{
-    p.x = Math.round(margin + span*i + srange(-40,40));
+    p.x = Math.round(margin + span*i + rrange(-40,40));
     p.y = groundY(p.x);
     p.hp = p.maxHp; p.shield = p.shieldBuy; p.shieldBuy=0;
     p.fuel = BASE_FUEL + p.fuelBonus;
@@ -549,9 +561,11 @@ function nextTurn(){
   do{ t=(t+1)%n; }while(!G.players[t].alive);
   G.turn=t;
   const p=G.players[t];
-  G.wind = srange(-WIND_MAX,WIND_MAX);
+  // wind is a random walk: intensity drifts gradually and can swing through
+  // zero to flip direction, but never jumps from strong-left to strong-right
+  G.wind = clamp(G.wind + (G.windRng()*2-1)*WIND_MAX*0.38, -WIND_MAX, WIND_MAX);
   G.state='aim';
-  G.turnTimer = TURN_TIME_ONLINE*60;
+  G.turnDeadline = performance.now() + TURN_TIME_ONLINE*1000;
   p.moveDir=0;
   updateHUD();
   toast(p.name.toLowerCase()==='you' ? 'Your turn' : `${p.name}'s turn`, p.color);
@@ -568,13 +582,13 @@ function isMyTurn(){
 function amAuthority(){ return G.mode!=='online' || NET.isHost; }
 
 // ---------- Firing & projectiles ----------
-function doFire(pi, weaponKey, angle, power){
+function doFire(pi, weaponKey, angle, power, fromNet){
   const p=G.players[pi]; if(!p.alive) return;
   p.angle=angle; p.power=power; p.weapon=weaponKey;
   const w=WEAPONS[weaponKey];
   if(p.ammo[weaponKey]!==Infinity){
-    if(p.ammo[weaponKey]<=0) return;
-    p.ammo[weaponKey]--;
+    if(p.ammo[weaponKey]>0) p.ammo[weaponKey]--;
+    else if(!fromNet) return;   // net fire is authoritative: never drop a remote shot over local ammo drift
   }
   G.state='shot'; G.shotBy=pi;
   AudioFX.fire();
@@ -710,16 +724,21 @@ function stepTanks(){
   }
 }
 // ---------- Turn items (teleport / repair) ----------
-function applyItem(pi,kind){
+function pickTeleportSpot(p){
+  for(let i=0;i<24;i++){
+    const cand=Math.round(50+frand()*(W-100));
+    if(G.players.every(o=>!o.alive||o===p||Math.abs(o.x-cand)>70)) return cand;
+  }
+  return p.x;
+}
+function applyItem(pi,kind,x){
   const p=G.players[pi]; if(!p||!p.alive) return;
   if(kind==='tp' && p.teleports>0){
     p.teleports--;
     addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
-    let nx=p.x;
-    for(let i=0;i<24;i++){                                  // deterministic: uses the sim RNG
-      const cand=Math.round(srange(50,W-50));
-      if(G.players.every(o=>!o.alive||o===p||Math.abs(o.x-cand)>70)){ nx=cand; break; }
-    }
+    // destination is chosen by the acting client and carried in the net message,
+    // so every client lands the tank in exactly the same spot
+    const nx = typeof x==='number' ? clamp(Math.round(x),50,W-50) : pickTeleportSpot(p);
     p.x=nx; flattenUnder(p); p.y=groundY(nx); p.falling=false; p.vy=0;
     addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
     floater(p.x,p.y-44,'🌀 teleported','#9fe8ff');
@@ -737,8 +756,9 @@ function useItem(kind){
   const p=localControl(); if(!p) return;
   if(kind==='tp' && p.teleports<=0) return;
   if(kind==='rp' && (p.repairs<=0 || p.hp>=p.maxHp)) return;
-  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind});
-  applyItem(p.id,kind);
+  const x = kind==='tp' ? pickTeleportSpot(p) : undefined;
+  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind,x});
+  applyItem(p.id,kind,x);
 }
 function anyMotion(){
   return G.proj.length>0 || G.plane || G.players.some(t=>t.alive&&t.falling);
@@ -747,7 +767,9 @@ function checkRoundEnd(){
   const al=alivePlayers();
   if(al.length<=1){
     G.state='roundend';
-    setTimeout(()=>roundEnd(al[0]||null), 900);
+    // only the authority declares the round over; clients wait for its
+    // 'roundend' message with the authoritative cash/scores
+    if(amAuthority()) setTimeout(()=>roundEnd(al[0]||null), 900);
     return true;
   }
   return false;
@@ -859,8 +881,8 @@ function drawOverlay(){
     ctx.fillStyle=cur.color; ctx.fillText(`● ${cur.name}${isBot(cur)?' 🤖':''}`, 16, 48);
   }
   if(G.mode==='online' && G.state==='aim'){
-    const s=Math.ceil(G.turnTimer/60);
-    ctx.textAlign='right'; ctx.fillStyle= s<=10? '#f87171':'rgba(255,255,255,.8)';
+    const s=Math.max(0, Math.ceil((G.turnDeadline-performance.now())/1000));  // wall-clock, never negative
+    ctx.textAlign='right'; ctx.fillStyle= s<=10? '#e06c5a':'rgba(255,255,255,.8)';
     ctx.font='bold 16px Segoe UI'; ctx.fillText('⏱ '+s+'s', W-16, 30);
   }
   // scores strip
@@ -904,21 +926,28 @@ function drawFX(){
 }
 
 // ---------- Main loop ----------
-let lastT=0;
+// Fixed 60Hz timestep with an accumulator: the sim advances at the same rate
+// on every monitor (a 144Hz display no longer runs the game 2.4× fast).
+let acc=0, lastTs=0;
 function frame(ts){
   requestAnimationFrame(frame);
-  if(!G || G.state==='idle'){ return; }
-  // fixed-ish 60fps stepping
-  stepGame();
+  if(!G || G.state==='idle'){ lastTs=ts; return; }
+  if(!lastTs) lastTs=ts;
+  acc += Math.min(100, ts-lastTs); lastTs=ts;
+  let n=0;
+  while(acc>=16.667 && n<4){ stepGame(); acc-=16.667; n++; }
+  if(n===4) acc=0;   // slow device: drop backlog rather than spiral
   // render
   ctx.save();
   if(shake>0) ctx.translate(frange(-shake,shake),frange(-shake,shake));
   drawTerrain();
-  for(const t of G.players) if(t.alive) drawTank(t);
-  if(G.state==='aim'){ const cur=G.players[G.turn]; if(cur.alive && (isMyTurn()||G.mode==='local')) drawAimPreview(cur); }
-  drawProjectiles();
-  drawFX();
-  drawOverlay();
+  if(G.roundActive) for(const t of G.players) if(t.alive) drawTank(t);
+  if(G.roundActive){
+    if(G.state==='aim'){ const cur=G.players[G.turn]; if(cur.alive && (isMyTurn()||G.mode==='local')) drawAimPreview(cur); }
+    drawProjectiles();
+    drawFX();
+    drawOverlay();
+  }
   ctx.restore();
 }
 function stepGame(){
@@ -940,12 +969,8 @@ function stepGame(){
     const cur=G.players[G.turn];
     // held movement
     if(cur && cur.alive && cur.moveDir && (isMyTurn()||(G.mode==='local'&&!isBot(cur)))) tryMove(cur, cur.moveDir);
-    if(G.mode==='online'){
-      G.turnTimer--;
-      if(G.turnTimer<=0 && amAuthority()){
-        // auto-skip
-        NET.send({t:'skip'}); applySkip();
-      }
+    if(G.mode==='online' && amAuthority() && performance.now()>G.turnDeadline){
+      NET.send({t:'skip'}); applySkip();   // host is the only clock that matters
     }
   }
 }
@@ -1104,13 +1129,17 @@ $('btnMenu').addEventListener('click',()=>{ location.reload(); });
 let shopQueue=[], shopIdx=0, shopReady=new Set();
 function openShopPhase(){
   G.state='shop';
-  if(amAuthority()) for(const p of G.players) if(isBot(p)) botShop(p);
+  if(amAuthority()) for(const p of G.players) if(isBot(p)){
+    botShop(p);
+    if(G.mode==='online') NET.sendBotInv(p);   // clients must mirror bot inventories or they'd drop bot shots
+  }
   if(G.mode==='online'){
     for(const p of G.players) if(isBot(p) || !p.alive && !p.peerId) shopReady.add(p.id);
     for(const p of G.players) if(p.peerId && !NET.lobby.some(l=>l.peerId===p.peerId)) shopReady.add(p.id); // disconnected
     const me=G.players.find(p=>p.peerId===NET.myId);
     showOnly('shopScreen'); hide('shopWait');
     renderShop(me);
+    renderShopReady();
   } else {
     shopQueue=G.players.filter(p=>!isBot(p));
     shopIdx=0;
@@ -1119,9 +1148,21 @@ function openShopPhase(){
     renderShop(shopQueue[0]);
   }
 }
+function renderShopReady(){
+  const box=$('shopReadyList');
+  if(!G || G.mode!=='online'){ box.innerHTML=''; return; }
+  box.innerHTML='';
+  for(const p of G.players){
+    const d=document.createElement('div');
+    d.innerHTML=`<span style="color:${p.color}">●</span> ${p.name}${isBot(p)?' 🤖':''}`+
+      `<span style="float:right">${shopReady.has(p.id)?'<span style="color:var(--good)">✔ ready</span>':'<span class="small">⏳ shopping…</span>'}</span>`;
+    box.appendChild(d);
+  }
+}
 function renderShop(p){
   $('shopTitle').innerHTML=`Armory — <span style="color:${p.color}">${p.name}</span>`;
-  $('shopSub').textContent=`Round ${G.round+1} of ${G.rounds} up next`;
+  const next = G.pendingFirstRound ? G.round : G.round+1;
+  $('shopSub').textContent = (G.pendingFirstRound?'Pre-battle loadout — ':'') + `Round ${next} of ${G.rounds} up next`;
   $('shopCash').textContent=fmt$(p.cash);
   const box=$('shopItems'); box.innerHTML='';
   const addRow=(icon,name,desc,price,ownTxt,canBuy,onBuy)=>{
@@ -1165,6 +1206,7 @@ $('btnShopDone').addEventListener('click',()=>{
     NET.send({t:'shopdone',pi:me.id});
     shopReady.add(me.id);
     $('btnShopDone').disabled=true; show('shopWait');
+    renderShopReady();
     if(NET.isHost) maybeAllReady();
   } else {
     shopIdx++;
@@ -1182,7 +1224,8 @@ function maybeAllReady(){
 function nextRoundStart(){
   shopReady=new Set();
   $('btnShopDone').disabled=false; hide('shopWait');
-  G.round++;
+  if(G.pendingFirstRound) G.pendingFirstRound=false;   // pre-match armory → round 1
+  else G.round++;
   showOnly(null); show('hud');
   startRound();
 }
@@ -1380,7 +1423,7 @@ const NET = {
         if(p.alive){ p.alive=false; p.hp=0;
           if(G.players[G.turn]===p && G.state==='aim'){ if(!checkRoundEnd()) nextTurn(); } else checkRoundEnd();
         }
-        if(G.state==='shop'){ shopReady.add(p.id); maybeAllReady(); }
+        if(G.state==='shop'){ shopReady.add(p.id); renderShopReady(); maybeAllReady(); }
       }
       this.send({t:'pdrop',peerId:conn.peer});
     }
@@ -1416,6 +1459,12 @@ const NET = {
     beginOnlineMatch(cfg);
   },
   pendingSync:null,
+  sendBotInv(p){ // Infinity doesn't survive serialization, so ship only finite ammo counts
+    const ammo={}; for(const k of WKEYS) if(k!=='missile') ammo[k]=p.ammo[k];
+    this.send({t:'botinv', pi:p.id, ammo,
+      stats:{cash:p.cash,chutes:p.chutes,fuelBonus:p.fuelBonus,shieldBuy:p.shieldBuy,
+             maxHp:p.maxHp,armor:p.armor,teleports:p.teleports,repairs:p.repairs}});
+  },
   syncState(){ // host → clients after each shot resolves
     this.send({t:'sync', turn:G.turn, wind:G.wind,
       tanks:G.players.map(p=>({x:Math.round(p.x),y:Math.round(p.y),hp:p.hp,sh:p.shield,al:p.alive,cash:p.cash,kills:p.kills,dmg:p.dmgDealt}))});
@@ -1438,15 +1487,19 @@ const NET = {
       case 'fire':{ if(!G) break;
         if(this.isHost) this.send(d,conn);
         const p=G.players[d.pi]; if(p){ p.x=d.x; p.y=groundY(p.x); }
-        doFire(d.pi,d.w,d.a,d.pw);
+        doFire(d.pi,d.w,d.a,d.pw,true);
         break; }
       case 'sync':{ if(!G) break;
         if(G.state==='shot'){ this.pendingSync=d; } else applySync(d);
         break; }
       case 'skip': if(!this.isHost) applySkip(); break;
-      case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind); break;
+      case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind,d.x); break;
       case 'buy': applyPurchase(d.pi,d.k,d.cat); if(this.isHost) this.send(d,conn); break;
-      case 'shopdone': shopReady.add(d.pi); if(this.isHost){ this.send(d,conn); maybeAllReady(); } break;
+      case 'botinv':{ const p=G&&G.players[d.pi]; if(!p) break;
+        Object.assign(p,d.stats);
+        for(const k in d.ammo) p.ammo[k]=d.ammo[k];
+        break; }
+      case 'shopdone': shopReady.add(d.pi); renderShopReady(); if(this.isHost){ this.send(d,conn); maybeAllReady(); } break;
       case 'nextround': nextRoundStart(); break;
       case 'roundend': if(!this.isHost){ d.cash.forEach((c,i)=>G.players[i].cash=c); d.score.forEach((s,i)=>G.players[i].score=s); showRoundEnd(d.wi>=0?G.players[d.wi]:null); } break;
       case 'pdrop':{ if(!G) break; const p=G.players.find(pp=>pp.peerId===d.peerId);
@@ -1552,7 +1605,7 @@ fitCanvas();
 showOnly('menuScreen');
 hide('hud');
 // idle backdrop: pre-generate a scene so the menu has something pretty behind it
-simRng=mulberry32(42); genTerrain('random'); buildSky();
+genTerrain('random', 42); buildSky();
 (function idleDraw(){ if(G) return; drawTerrain(); requestAnimationFrame(idleDraw); })();
 requestAnimationFrame(frame);
 </script>
