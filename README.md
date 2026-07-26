@@ -2,7 +2,7 @@
 
 A single-file remake of the classic *Tanks* Flash game (the mathsisfun.com one), rebuilt with modern web tech. Turn-based artillery: aim with angle and power, fight the wind, blow craters in destructible terrain, earn cash, and buy bigger guns between rounds.
 
-Everything lives in one file: **index.html**. No build step, no server, no dependencies to install.
+The site is a small set of static files — `index.html`, `styles.css`, and a handful of `.js` modules. No server, no dependencies, no framework. (`tanks-single.html` is the same game bundled into one self-contained file, handy for sharing; `build.py` regenerates everything from `src/`.)
 
 ## Game modes
 
@@ -23,7 +23,7 @@ Everything lives in one file: **index.html**. No build step, no server, no depen
 
 Send that link to your friends — one person hosts a room, everyone else joins with the code.
 
-To update the game later, just upload a new `index.html` over the old one.
+Upload all the site files (`index.html`, `styles.css`, and the `.js` files). To update later, upload only the files that changed.
 
 ## Controls
 
@@ -47,7 +47,13 @@ Every tank starts the match with one free parachute — it auto-deploys on long 
 
 Terrain is fully destructible — it erodes for real, with no indestructible floor. Dig deep enough and a tank can fall clean through the map: that's an elimination.
 
-Match settings let you tune the game without touching code: damage multiplier, shield multiplier, starting loadouts (Standard kit / Heavy kit / pre-match shop / nothing), rounds, terrain, and starting cash. The host picks them in the lobby for online games.
+Match settings let you tune the game without touching code: damage multiplier, shield multiplier, starting loadouts (Standard kit / Heavy kit / pre-match shop / nothing), relic mode, rounds, terrain, and starting cash. The host picks them in the lobby for online games.
+
+## Relics
+
+After every round, each player drafts a **relic** — a permanent passive ability, Slay-the-Spire style. Pick 1 of 3, or set the match to hand out random relics, or disable them entirely. There are 31, from the practical (**Windcutter** ignores half the wind, **Quartermaster** fattens ammo packs) to the tactical (**Double Tap** fires twice, **Entrencher** adds a DIG IN action) to the cursed (**Glass Cannon**, **Dead Man's Switch** — you detonate on death). Bots draft too. Everyone's relics are public — the 🎖️ button opens an intel panel showing every player's build, so you can plan around what's in play.
+
+Separately, every armory visit features a **🏴 Black Market**: one random item is 40% off for you each round (everyone gets their own deal).
 
 You earn cash for every point of damage ($15/hp), kills ($2,000), surviving a round ($1,500), and winning it ($5,000).
 
