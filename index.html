@@ -849,6 +849,17 @@ function checkRoundEnd(){
     if(amAuthority()) setTimeout(()=>roundEnd(al[0]||null), 900);
     return true;
   }
+  // every human is out and only bots remain: don't make anyone spectate a
+  // bot slugfest — fast-forward, healthiest bot takes the round.
+  // (deliberate all-bot matches still play out; watching is the point there)
+  if(al.every(isBot) && G.players.some(p=>!isBot(p))){
+    G.state='roundend';
+    const winner=[...al].sort((a,b)=>
+      (b.hp+b.shield)-(a.hp+a.shield) || b.hp-a.hp || b.dmgDealt-a.dmgDealt || a.id-b.id)[0];
+    toast('Only bots left — fast-forwarding: '+winner.name+' takes the round','#e3b64f');
+    if(amAuthority()) setTimeout(()=>roundEnd(winner), 1400);
+    return true;
+  }
   return false;
 }
 // ---------- Draw scene ----------
