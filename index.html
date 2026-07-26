@@ -761,11 +761,16 @@ function stepTanks(){
     if(t.falling && t.y >= gy-1){          // landed (or clipped into the grounded band)
       t.y=gy; t.falling=false; const fell=t.y-t.fallStart; t.vy=0;
       let impact=0;
-      if(!t.chuteOn && fell>FALL_SAFE){ impact=Math.round((fell-FALL_SAFE)*FALL_DMG); applyDamage(t,impact,null); }
-      if(impact>0){                        // drop attack: crush whoever you land on for the same damage
-        for(const v of G.players){
+      if(!t.chuteOn && fell>FALL_SAFE) impact=Math.round((fell-FALL_SAFE)*FALL_DMG);
+      if(impact>0){
+        // drop attack: crush is capped at the dropper's own health at the moment
+        // of impact — you can't deliver more force than tank you have to give.
+        // a 200-damage drop is a kamikaze, not a free kill.
+        const crush=Math.min(impact, Math.max(0,Math.round(t.hp)));
+        applyDamage(t,impact,null);
+        if(crush>0) for(const v of G.players){
           if(v!==t && v.alive && Math.abs(v.x-t.x)<26 && Math.abs(v.y-t.y)<32){
-            applyDamage(v,impact,t);
+            applyDamage(v,crush,t);
             floater(v.x,v.y-56,'💥 crushed!','#e3b64f');
             shake=Math.max(shake,12);
           }
@@ -977,9 +982,10 @@ function drawTpAim(){
   const fell = Math.max(0, Math.min(gy,H+600)-t.y);
   const est = (!useChute && fell>FALL_SAFE)? Math.round((fell-FALL_SAFE)*FALL_DMG) : 0;
   const victim = G.players.find(v=>v!==p && v.alive && Math.abs(v.x-t.x)<26);
+  const crush = Math.min(est, Math.max(0,Math.round(p.hp)));   // crush capped at your own health
   let txt;
   if(voidCol) txt='☠ THE ABYSS';
-  else if(est>0) txt='~'+est+' impact dmg'+(victim? ' → 💥 DROP ON '+victim.name.toUpperCase()+'!':'');
+  else if(est>0) txt='~'+est+' impact dmg'+(victim? ' → 💥 ~'+crush+' TO '+victim.name.toUpperCase()+(est>=p.hp?' (KAMIKAZE!)':'!'):'');
   else if(useChute && fell>40) txt='🪂 soft landing';
   else txt='safe landing';
   ctx.font='bold 14px Segoe UI'; ctx.textAlign='center';
