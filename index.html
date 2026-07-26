@@ -130,6 +130,7 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
         <button class="big" id="btnHotseat">👥 &nbsp;Local Hotseat</button>
         <button class="big" id="btnHost">🌐 &nbsp;Host Online Game</button>
         <button class="big" id="btnJoin">🔗 &nbsp;Join Online Game</button>
+        <button class="big" id="btnSandbox">🧪 &nbsp;Sandbox — all weapons, respawns</button>
         <h3>How to play</h3>
         <div class="helpline"><span class="kbd">←</span><span class="kbd">→</span> aim &nbsp; <span class="kbd">↑</span><span class="kbd">↓</span> power &nbsp; <span class="kbd">A</span><span class="kbd">D</span> move &nbsp; <span class="kbd">Space</span> fire</div>
         <div class="helpline">Mind the <b style="color:var(--acc2)">wind</b>. Earn cash for damage; buy bigger guns between rounds.</div>
@@ -260,6 +261,7 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
       <button class="hudbtn" id="btnChute" title="Toggle parachute auto-deploy (off = fall damage + drop attacks)">🪂<span id="chuteCount">0</span></button>
     </div>
     <button id="fireBtn">FIRE!</button>
+    <button class="hudbtn danger hidden" id="btnExitSandbox" title="Leave sandbox">✕ Exit</button>
   </div>
 </div>
 <script>
@@ -553,10 +555,16 @@ function newMatch(cfgPlayers, opts){
     turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|over
     proj:[], pendingBombs:[], turnDeadline:0, shotBy:-1,
     seed:opts.seed, roundActive:false, pendingFirstRound:true, tpAim:null,
+    sandbox:!!opts.sandbox,
     set:{ dmgMul:+(opts.dmgMul||1), shieldMul:(opts.shieldMul==null?1:+opts.shieldMul), loadout:opts.loadout||'shop' },
   };
   for(const p of G.players) p.cash = opts.cash||0;
   if(LOADOUTS[G.set.loadout]) for(const p of G.players) LOADOUTS[G.set.loadout].apply(p);
+  if(G.sandbox) for(const p of G.players){   // sandbox: the whole arsenal, effectively unlimited
+    for(const k of WKEYS) if(k!=='missile') p.ammo[k]=99;
+    p.teleports=99; p.repairs=99; p.chutes=99; p.cash=999999;
+  }
+  $('btnExitSandbox').classList.toggle('hidden', !G.sandbox);
   if(G.set.loadout==='shop') openShopPhase();   // pre-match armory: spend starting cash before round 1
   else { G.pendingFirstRound=false; startRound(); }
 }
@@ -591,6 +599,7 @@ function alivePlayers(){ return G.players.filter(p=>p.alive); }
 
 function nextTurn(){
   if(checkRoundEnd()) return;
+  if(!alivePlayers().length){ setTimeout(()=>{ if(G&&G.state!=='over') nextTurn(); },900); return; }  // sandbox: everyone respawning
   let n=G.players.length, t=G.turn;
   do{ t=(t+1)%n; }while(!G.players[t].alive);
   G.turn=t;
@@ -736,6 +745,20 @@ function killTank(t,shooter){
   addParticles(t.x,t.y-10,30,{cols:[t.color,'#333','#666'],sp0:2,sp1:8,l0:30,l1:80,s0:2,s1:6,grav:0.2});
   floater(t.x,t.y-60,'💀 '+t.name+' destroyed!','#fff');
   if(shooter&&shooter!==t){ shooter.kills++; shooter.cash+=2000; }
+  if(G.sandbox) scheduleRespawn(t);
+}
+function scheduleRespawn(t){
+  setTimeout(()=>{
+    if(!G || !G.sandbox || t.alive) return;
+    let x=t.x;
+    for(let i=0;i<30;i++){ const cand=Math.round(60+frand()*(W-120));
+      if(groundY(cand)<H-20 && G.players.every(o=>!o.alive||o===t||Math.abs(o.x-cand)>80)){ x=cand; break; } }
+    t.x=x; t.y=groundY(x); t.hp=t.maxHp; t.shield=Math.round(50*G.set.shieldMul);
+    t.alive=true; t.falling=false; t.vy=0; t.chuteOn=false;
+    t.fuel=BASE_FUEL+t.fuelBonus;
+    addParticles(t.x,t.y-12,30,{cols:['#9fe8ff','#fff','#7fb069'],sp0:1,sp1:5,l0:20,l1:40,s0:2,s1:4,grav:-0.04});
+    floater(t.x,t.y-46,'♻️ respawned','#7fb069');
+  }, 2500);
 }
 
 // gravity on tanks (terrain collapsed under them)
@@ -747,6 +770,7 @@ function stepTanks(){
       t.hp=0; t.alive=false; t.falling=false; t.chuteOn=false;
       floater(t.x, H-60, '🕳️ '+t.name+' fell into the abyss!', '#fff');
       AudioFX.boom(0.9); shake=Math.max(shake,10);
+      if(G.sandbox) scheduleRespawn(t);
       continue;
     }
     const gy=groundY(t.x);
@@ -846,6 +870,7 @@ function anyMotion(){
   return G.proj.length>0 || G.plane || G.players.some(t=>t.alive&&t.falling);
 }
 function checkRoundEnd(){
+  if(G.sandbox) return false;              // sandbox never ends — everyone respawns
   const al=alivePlayers();
   if(al.length<=1){
     G.state='roundend';
@@ -947,7 +972,11 @@ function drawAimPreview(p){
     const gy=groundY(tx);
     ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=2; ctx.setLineDash([6,6]);
     ctx.beginPath(); ctx.moveTo(tx,60); ctx.lineTo(tx,gy); ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle='#ff5d5d'; ctx.beginPath(); ctx.arc(tx,gy,14,0,7); ctx.moveTo(tx-20,gy); ctx.lineTo(tx+20,gy); ctx.moveTo(tx,gy-20); ctx.lineTo(tx,gy+20); ctx.stroke();
+    const pu=2+Math.sin(performance.now()/200)*2;
+    ctx.strokeStyle='#ff5d5d'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(tx,gy,14+pu,0,7); ctx.moveTo(tx-22,gy); ctx.lineTo(tx+22,gy); ctx.moveTo(tx,gy-22); ctx.lineTo(tx,gy+22); ctx.stroke();
+    ctx.font='11px Segoe UI'; ctx.textAlign='center'; ctx.fillStyle='rgba(255,255,255,.65)';
+    ctx.fillText('✈️ move mouse to aim • click (or FIRE) to call the strike', tx, Math.max(20,gy-34));
     return;
   }
   // dotted trajectory preview (first part of the arc, wind included)
@@ -1010,7 +1039,7 @@ function drawOverlay(){
   ctx.fillText((wp<0?'◀ ':'')+mph+(wp>0?' ▶':''), cx, cy+24- (wp===0?0:0));
   // round / turn banner
   ctx.textAlign='left'; ctx.font='bold 14px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText(`Round ${G.round}/${G.rounds}`, 16, 26);
+  ctx.fillText(G.sandbox? '🧪 SANDBOX' : `Round ${G.round}/${G.rounds}`, 16, 26);
   const cur=G.players[G.turn];
   if(cur && (G.state==='aim'||G.state==='shot')){
     ctx.fillStyle=cur.color; ctx.fillText(`● ${cur.name}${isBot(cur)?' 🤖':''}`, 16, 48);
@@ -1211,14 +1240,29 @@ $('fireBtn').addEventListener('click',()=>{AudioFX.unlock(); fireLocal();});
 $('btnTeleport').addEventListener('click',()=>{AudioFX.unlock(); useItem('tp'); updateHUD();});
 $('btnRepair').addEventListener('click',()=>{AudioFX.unlock(); useItem('rp');});
 $('btnChute').addEventListener('click',()=>{AudioFX.unlock(); toggleChute();});
-// teleport targeting via mouse on the battlefield
+// battlefield mouse targeting: teleports (anywhere) and air strikes (ground reticle)
+let lastAimNet=0;
 canvas.addEventListener('mousemove',e=>{
-  if(!G||!G.tpAim) return;
+  if(!G) return;
   const r=canvas.getBoundingClientRect();
-  G.tpAim.x=clamp((e.clientX-r.left)/r.width*W, 50, W-50);
-  G.tpAim.y=clamp((e.clientY-r.top)/r.height*H, 40, H-4);
+  const wx=(e.clientX-r.left)/r.width*W, wy=(e.clientY-r.top)/r.height*H;
+  if(G.tpAim){
+    G.tpAim.x=clamp(wx,50,W-50); G.tpAim.y=clamp(wy,40,H-4);
+    return;
+  }
+  const p=localControl();
+  if(p && p.weapon==='strike'){                 // strike reticle rides the mouse (x only, stays on the ground)
+    p.angle=clamp(wx/W*180, 2, 178);
+    $('angVal').textContent=Math.round(p.angle)+'°';
+    const now=performance.now();
+    if(G.mode==='online' && now-lastAimNet>120){ lastAimNet=now; netAim(p); }
+  }
 });
-canvas.addEventListener('click',()=>{ if(G&&G.tpAim){ AudioFX.unlock(); confirmTp(); updateHUD(); } });
+canvas.addEventListener('click',()=>{
+  if(G&&G.tpAim){ AudioFX.unlock(); confirmTp(); updateHUD(); return; }
+  const p=localControl();
+  if(p && p.weapon==='strike'){ AudioFX.unlock(); fireLocal(); }   // click the ground = call the strike
+});
 canvas.addEventListener('contextmenu',e=>{ if(G&&G.tpAim){ e.preventDefault(); cancelTp(); updateHUD(); } });
 $('weaponSel').addEventListener('change',e=>{const p=localControl(); if(p){p.weapon=e.target.value; updateHUD(); }});
 
@@ -1745,6 +1789,15 @@ $('btnStartMatch').onclick=()=>{
 };
 
 $('btnVsBots').onclick=()=>{AudioFX.unlock();AudioFX.click(); openSetup('bots');};
+$('btnSandbox').onclick=()=>{
+  AudioFX.unlock(); AudioFX.click();
+  showOnly(null); show('hud');
+  newMatch([{name:'You',type:'human'},{name:'Bot Blue',type:'bot-medium'},{name:'Bot Green',type:'bot-medium'}],
+    {mode:'local', seed:(Math.random()*1e9)|0, map:'random', rounds:1, cash:0,
+     loadout:'none', dmgMul:1.5, shieldMul:0.75, sandbox:true});
+  toast('🧪 Sandbox: all weapons, everyone respawns — hit ✕ Exit to leave','#a9c25d');
+};
+$('btnExitSandbox').onclick=()=>location.reload();
 $('btnHotseat').onclick=()=>{AudioFX.unlock();AudioFX.click(); openSetup('hotseat');};
 $('btnHost').onclick=()=>{AudioFX.unlock();AudioFX.click();
   $('lobbyTitle').textContent='Host Online Game'; hide('rowCode'); show('joinBox'); hide('hostBox');
