@@ -105,6 +105,8 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
   opacity:0; transition:opacity .25s;
 }
 .kbd{background:#2b351b; border:1px solid var(--edge); border-bottom-width:3px; border-radius:5px; padding:1px 7px; font-size:12px; font-family:monospace;}
+#btnChute.chuteOff{opacity:.45; filter:grayscale(1); text-decoration:line-through;}
+#btnTeleport.aiming{background:linear-gradient(180deg,#1e4a56,#143540); border-color:#5fc8e8;}
 .helpline{margin:4px 0; color:var(--dim); font-size:13px;}
 @media (max-width:760px){
   h1{font-size:38px;}
@@ -150,6 +152,16 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
         </div>
         <div class="row" id="rowStartCash"><label>Start cash</label>
           <select id="selCash"><option value="0">$0</option><option value="10000" selected>$10,000</option><option value="40000">$40,000</option></select>
+          <label>Loadout</label>
+          <select id="selLoadout">
+            <option value="standard" selected>Standard kit</option><option value="heavy">Heavy kit</option>
+            <option value="shop">Shop before round 1</option><option value="none">Nothing (classic)</option>
+          </select>
+        </div>
+        <div class="row"><label>Damage ×</label>
+          <select id="selDmg"><option>0.5</option><option>0.75</option><option>1</option><option selected>1.5</option><option>2</option><option>3</option></select>
+          <label>Shield ×</label>
+          <select id="selShield"><option>0</option><option>0.5</option><option selected>0.75</option><option>1</option><option>1.5</option><option>2</option></select>
         </div>
         <div class="row" style="margin-top:14px">
           <button class="primary" style="flex:1" id="btnStartMatch">Start match ➜</button>
@@ -179,6 +191,17 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
               </select>
               <label>Rounds</label>
               <select id="selRoundsOnline"><option>1</option><option selected>3</option><option>5</option></select>
+            </div>
+            <div class="row"><label>Loadout</label>
+              <select id="selLoadoutOnline">
+                <option value="standard" selected>Standard kit</option><option value="heavy">Heavy kit</option>
+                <option value="shop">Shop before round 1</option><option value="none">Nothing (classic)</option>
+              </select>
+            </div>
+            <div class="row"><label>Damage ×</label>
+              <select id="selDmgOnline"><option>0.5</option><option>0.75</option><option>1</option><option selected>1.5</option><option>2</option><option>3</option></select>
+              <label>Shield ×</label>
+              <select id="selShieldOnline"><option>0</option><option>0.5</option><option selected>0.75</option><option>1</option><option>1.5</option><option>2</option></select>
             </div>
             <div class="row"><label>Add bot</label>
               <button class="hudbtn" id="btnBotEasy">Easy</button>
@@ -232,8 +255,9 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
     </div>
     <div class="hudgroup"><span class="lab">Weapon</span><select id="weaponSel"></select></div>
     <div class="hudgroup"><span class="lab">Items</span>
-      <button class="hudbtn" id="btnTeleport" title="Teleport to a random spot">🌀<span id="tpCount">0</span></button>
+      <button class="hudbtn" id="btnTeleport" title="Teleport: aim anywhere, even mid-air">🌀<span id="tpCount">0</span></button>
       <button class="hudbtn" id="btnRepair" title="Field repair: +35 HP">🔧<span id="rpCount">0</span></button>
+      <button class="hudbtn" id="btnChute" title="Toggle parachute auto-deploy (off = fall damage + drop attacks)">🪂<span id="chuteCount">0</span></button>
     </div>
     <button id="fireBtn">FIRE!</button>
   </div>
@@ -300,17 +324,17 @@ const AudioFX = (()=> {
 //        'digger' tunnels, 'airstrike' plane drops bombs at target x
 const WEAPONS = {
   missile : {name:'Missile',        icon:'🚀', kind:'shot',    r:30,  dmg:25, price:0,     ammo:Infinity, trail:'#ffd28a'},
-  bigshot : {name:'Big Missile',    icon:'💥', kind:'shot',    r:48,  dmg:42, price:2000,  ammo:5,  trail:'#ffab6b'},
-  shower  : {name:'Shower',         icon:'🎇', kind:'cluster', r:20,  dmg:12, price:3500,  ammo:3,  frags:6,  trail:'#9be7ff'},
-  volcano : {name:'Volcano Bomb',   icon:'🌋', kind:'volcano', r:24,  dmg:15, price:6000,  ammo:2,  frags:9,  trail:'#ff8f6b'},
-  digger  : {name:'Digger',         icon:'⛏️', kind:'digger',  r:20,  dmg:32, price:2500,  ammo:3,  depth:9,  trail:'#d3c9a5'},
-  atom    : {name:'Atom Bomb',      icon:'☢️', kind:'shot',    r:115, dmg:78, price:13000, ammo:1,  trail:'#c9ff6b'},
-  strike  : {name:'Air Strike',     icon:'✈️', kind:'airstrike',r:34, dmg:22, price:25000, ammo:1,  bombs:5,  trail:'#ffffff'},
+  bigshot : {name:'Big Missile',    icon:'💥', kind:'shot',    r:48,  dmg:42, price:2000,  ammo:6,  trail:'#ffab6b'},
+  shower  : {name:'Shower',         icon:'🎇', kind:'cluster', r:20,  dmg:12, price:3500,  ammo:4,  frags:6,  trail:'#9be7ff'},
+  volcano : {name:'Volcano Bomb',   icon:'🌋', kind:'volcano', r:24,  dmg:15, price:6000,  ammo:3,  frags:9,  trail:'#ff8f6b'},
+  digger  : {name:'Digger',         icon:'⛏️', kind:'digger',  r:20,  dmg:32, price:2500,  ammo:4,  depth:9,  trail:'#d3c9a5'},
+  atom    : {name:'Atom Bomb',      icon:'☢️', kind:'shot',    r:115, dmg:78, price:11000, ammo:1,  trail:'#c9ff6b'},
+  strike  : {name:'Air Strike',     icon:'✈️', kind:'airstrike',r:34, dmg:22, price:20000, ammo:1,  bombs:5,  trail:'#ffffff'},
 };
 const GEAR = {
-  parachute:{name:'Parachutes ×3', icon:'🪂', price:5000,  desc:'Auto-deploys, prevents fall damage', give:p=>p.chutes+=3},
-  teleport :{name:'Teleporter',    icon:'🌀', price:6000,  desc:'Warp to a random spot — use on your turn', give:p=>p.teleports+=1},
-  repair   :{name:'Repair Kit',    icon:'🔧', price:3500,  desc:'+35 HP field repair — use on your turn',   give:p=>p.repairs+=1},
+  parachute:{name:'Parachutes ×3', icon:'🪂', price:5000,  desc:'Auto-deploys, prevents fall damage (toggle in HUD)', give:p=>p.chutes+=3},
+  teleport :{name:'Teleporters ×2',icon:'🌀', price:6000,  desc:'Warp anywhere you aim — even mid-air for a drop attack', give:p=>p.teleports+=2},
+  repair   :{name:'Repair Kits ×2',icon:'🔧', price:3500,  desc:'+35 HP field repair — use on your turn',   give:p=>p.repairs+=2},
   fuel     :{name:'Fuel Tank +100',icon:'⛽', price:1800,  desc:'More moves this & future rounds',    give:p=>p.fuelBonus+=100},
   shield1  :{name:'Shield',        icon:'🛡️', price:5000,  desc:'+50 shield at round start',          give:p=>p.shieldBuy=Math.max(p.shieldBuy,50)},
   shield2  :{name:'Heavy Shield',  icon:'🔰', price:12000, desc:'+110 shield at round start',         give:p=>p.shieldBuy=Math.max(p.shieldBuy,110)},
@@ -318,6 +342,13 @@ const GEAR = {
   armor    :{name:'Composite Armor',icon:'🧱',price:9000,  desc:'−12% damage taken (stacks ×3)',      give:p=>p.armor=Math.min(3,p.armor+1)},
 };
 const WKEYS = Object.keys(WEAPONS), GKEYS = Object.keys(GEAR);
+
+// ---------- Starting loadouts (chosen at match setup) ----------
+const LOADOUTS = {
+  standard:{apply:p=>{ p.ammo.bigshot+=3; p.ammo.shower+=4; p.ammo.digger+=3; p.shieldBuy=Math.max(p.shieldBuy,50); }},
+  heavy:   {apply:p=>{ p.ammo.bigshot+=5; p.ammo.volcano+=3; p.ammo.digger+=4; p.ammo.atom+=1;
+                       p.teleports+=1; p.repairs+=1; p.chutes+=1; p.shieldBuy=Math.max(p.shieldBuy,110); }},
+};
 // ---------- Terrain ----------
 const THEMES = {
   desert:  {skyTop:'#2e1e4f', skyBot:'#ff9a5a', sun:'#ffd98a', ground:['#e8b96a','#b9843f','#7a5326'], deco:'cactus', rough:0.45, hills:90 },
@@ -349,7 +380,11 @@ function genTerrain(name, seed){
   const n = 10+Math.floor(r()*8);
   for(let i=0;i<n;i++) decos.push({x:Math.floor(rr(20,W-20)), seed:r()});
 }
-function groundY(x){ x=clamp(Math.round(x),0,W-1); return H - terrain[x]; }
+function groundY(x){
+  x=clamp(Math.round(x),0,W-1);
+  const h=terrain[x];
+  return h<=1 ? H+600 : H-h;   // fully-eroded column = open void: nothing to stand on
+}
 
 function carveCrater(cx,cy,r){
   const x0=Math.max(0,Math.floor(cx-r)), x1=Math.min(W-1,Math.ceil(cx+r));
@@ -362,7 +397,7 @@ function carveCrater(cx,cy,r){
     if(bot<=g) continue;                    // circle fully above ground
     const newTop = Math.max(g, top);        // portion below ground removed => raise ground top to 'bot'
     const removed = bot - newTop;
-    terrain[x] = Math.max(6, terrain[x] - removed);
+    terrain[x] = Math.max(0, terrain[x] - removed);   // ground can be worn away completely
   }
 }
 function digTunnel(cx,cy,r,depth){ // digger: narrow deep gouge
@@ -500,7 +535,7 @@ function makePlayer(cfg,i){
     peerId:cfg.peerId||null,           // owner connection (online)
     x:0, y:0, angle: i%2? 135:45, power:60,
     hp:BASE_HP, maxHp:BASE_HP, shield:0, shieldBuy:0,
-    fuel:BASE_FUEL, fuelBonus:0, chutes:1, armor:0, teleports:0, repairs:0,
+    fuel:BASE_FUEL, fuelBonus:0, chutes:1, chuteEnabled:true, armor:0, teleports:0, repairs:0,
     cash:0, score:0, kills:0, dmgDealt:0,
     ammo:{missile:Infinity, bigshot:0, shower:0, volcano:0, digger:0, atom:0, strike:0},
     weapon:'missile', alive:true, falling:false, fallStart:0, chuteOn:false,
@@ -517,10 +552,13 @@ function newMatch(cfgPlayers, opts){
     map:opts.map||'random',
     turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|over
     proj:[], pendingBombs:[], turnDeadline:0, shotBy:-1,
-    seed:opts.seed, roundActive:false, pendingFirstRound:true,
+    seed:opts.seed, roundActive:false, pendingFirstRound:true, tpAim:null,
+    set:{ dmgMul:+(opts.dmgMul||1), shieldMul:(opts.shieldMul==null?1:+opts.shieldMul), loadout:opts.loadout||'shop' },
   };
   for(const p of G.players) p.cash = opts.cash||0;
-  openShopPhase();                 // pre-match armory: spend starting cash before round 1
+  if(LOADOUTS[G.set.loadout]) for(const p of G.players) LOADOUTS[G.set.loadout].apply(p);
+  if(G.set.loadout==='shop') openShopPhase();   // pre-match armory: spend starting cash before round 1
+  else { G.pendingFirstRound=false; startRound(); }
 }
 function startRound(){
   // Everything round-defining comes from a per-round RNG derived only from
@@ -539,22 +577,15 @@ function startRound(){
   order.forEach((p,i)=>{
     p.x = Math.round(margin + span*i + rrange(-40,40));
     p.y = groundY(p.x);
-    p.hp = p.maxHp; p.shield = p.shieldBuy; p.shieldBuy=0;
+    p.hp = p.maxHp; p.shield = Math.round(p.shieldBuy*G.set.shieldMul); p.shieldBuy=0;
     p.fuel = BASE_FUEL + p.fuelBonus;
     p.alive = true; p.falling=false; p.chuteOn=false;
     p.angle = p.x > W/2 ? 135 : 45; p.power=60;
-    flattenUnder(p);
   });
   G.proj=[]; G.pendingBombs=[];
   G.turn = (G.round-1) % n - 1;   // rotate first player each round
   particles=[]; floaters=[];
   nextTurn();
-}
-function flattenUnder(p){
-  const x0=Math.max(0,p.x-16), x1=Math.min(W-1,p.x+16);
-  let m=0; for(let x=x0;x<=x1;x++) m+=terrain[x]; m/=(x1-x0+1);
-  for(let x=x0;x<=x1;x++) terrain[x]=m;
-  p.y=groundY(p.x);
 }
 function alivePlayers(){ return G.players.filter(p=>p.alive); }
 
@@ -568,6 +599,7 @@ function nextTurn(){
   // zero to flip direction, but never jumps from strong-left to strong-right
   G.wind = clamp(G.wind + (G.windRng()*2-1)*WIND_MAX*0.38, -WIND_MAX, WIND_MAX);
   G.state='aim';
+  G.tpAim=null;
   G.turnDeadline = performance.now() + TURN_TIME_ONLINE*1000;
   p.moveDir=0;
   updateHUD();
@@ -682,7 +714,7 @@ function explodeAt(x,y,r,dmg,owner,skipCarve){
     if(!t.alive) continue;
     const dx=t.x-x, dy=(t.y-12)-y, d=Math.sqrt(dx*dx+dy*dy);
     if(d < r+16){
-      let amt = dmg * clamp(1 - d/(r+16), 0.25, 1);
+      let amt = dmg * G.set.dmgMul * clamp(1 - d/(r+16), 0.35, 1);
       amt *= (1 - 0.12*t.armor);
       amt = Math.round(amt);
       applyDamage(t, amt, shooter);
@@ -710,18 +742,35 @@ function killTank(t,shooter){
 function stepTanks(){
   for(const t of G.players){
     if(!t.alive) continue;
+    // fell out of the world → eliminated (no shooter credit; the terrain did it)
+    if(t.y > H+40){
+      t.hp=0; t.alive=false; t.falling=false; t.chuteOn=false;
+      floater(t.x, H-60, '🕳️ '+t.name+' fell into the abyss!', '#fff');
+      AudioFX.boom(0.9); shake=Math.max(shake,10);
+      continue;
+    }
     const gy=groundY(t.x);
     if(t.y < gy-1){
       if(!t.falling){ t.falling=true; t.fallStart=t.y; t.vy=0; t.chuteOn=false; }
       const dist=t.y-t.fallStart;
-      if(t.chutes>0 && dist>40 && !t.chuteOn){ t.chuteOn=true; t.chutes--; floater(t.x,t.y-40,'🪂','#fff'); }
+      if(t.chutes>0 && t.chuteEnabled && dist>40 && !t.chuteOn){ t.chuteOn=true; t.chutes--; floater(t.x,t.y-40,'🪂','#fff'); }
       t.vy=(t.vy||0)+ (t.chuteOn? 0.02:GRAV);
       if(t.chuteOn) t.vy=Math.min(t.vy,1.1);
       t.y+=t.vy;
     }
     if(t.falling && t.y >= gy-1){          // landed (or clipped into the grounded band)
       t.y=gy; t.falling=false; const fell=t.y-t.fallStart; t.vy=0;
-      if(!t.chuteOn && fell>FALL_SAFE){ const d=Math.round((fell-FALL_SAFE)*FALL_DMG); applyDamage(t,d,null); }
+      let impact=0;
+      if(!t.chuteOn && fell>FALL_SAFE){ impact=Math.round((fell-FALL_SAFE)*FALL_DMG); applyDamage(t,impact,null); }
+      if(impact>0){                        // drop attack: crush whoever you land on for the same damage
+        for(const v of G.players){
+          if(v!==t && v.alive && Math.abs(v.x-t.x)<26 && Math.abs(v.y-t.y)<32){
+            applyDamage(v,impact,t);
+            floater(v.x,v.y-56,'💥 crushed!','#e3b64f');
+            shake=Math.max(shake,12);
+          }
+        }
+      }
       t.chuteOn=false;
     } else if(!t.falling && t.y>gy){ t.y=gy; }
   }
@@ -730,19 +779,22 @@ function stepTanks(){
 function pickTeleportSpot(p){
   for(let i=0;i<24;i++){
     const cand=Math.round(50+frand()*(W-100));
-    if(G.players.every(o=>!o.alive||o===p||Math.abs(o.x-cand)>70)) return cand;
+    if(groundY(cand) < H-20 &&                              // solid ground only — no warping over the abyss
+       G.players.every(o=>!o.alive||o===p||Math.abs(o.x-cand)>70)) return cand;
   }
   return p.x;
 }
-function applyItem(pi,kind,x){
+function applyItem(pi,kind,x,y){
   const p=G.players[pi]; if(!p||!p.alive) return;
   if(kind==='tp' && p.teleports>0){
     p.teleports--;
     addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
-    // destination is chosen by the acting client and carried in the net message,
-    // so every client lands the tank in exactly the same spot
+    // destination is chosen by the acting player (aimed, incl. mid-air) and carried
+    // in the net message, so every client lands the tank in exactly the same spot
     const nx = typeof x==='number' ? clamp(Math.round(x),50,W-50) : pickTeleportSpot(p);
-    p.x=nx; flattenUnder(p); p.y=groundY(nx); p.falling=false; p.vy=0;
+    const gy = groundY(nx);
+    const ny = typeof y==='number' ? Math.min(Math.round(y), gy) : gy;
+    p.x=nx; p.y=ny; p.falling=false; p.vy=0;   // if ny is mid-air, stepTanks starts the fall
     addParticles(p.x,p.y-12,26,{cols:['#9fe8ff','#e8fbff','#5fc8e8'],sp0:1,sp1:4,l0:16,l1:36,s0:1.5,s1:4,grav:-0.03});
     floater(p.x,p.y-44,'🌀 teleported','#9fe8ff');
     AudioFX.beep();
@@ -757,11 +809,33 @@ function applyItem(pi,kind,x){
 }
 function useItem(kind){
   const p=localControl(); if(!p) return;
-  if(kind==='tp' && p.teleports<=0) return;
+  if(kind==='tp'){
+    if(G.tpAim){ cancelTp(); return; }          // second press cancels targeting
+    if(p.teleports<=0) return;
+    G.tpAim={pi:p.id, x:p.x, y:Math.max(60,p.y-220)};
+    toast('Aim the teleport: mouse or arrow keys, click / Space to warp, Esc to cancel','#9fe8ff');
+    return;
+  }
   if(kind==='rp' && (p.repairs<=0 || p.hp>=p.maxHp)) return;
-  const x = kind==='tp' ? pickTeleportSpot(p) : undefined;
-  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind,x});
-  applyItem(p.id,kind,x);
+  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind});
+  applyItem(p.id,kind);
+}
+function confirmTp(){
+  const t=G.tpAim; if(!t) return;
+  const p=G.players[t.pi]; if(!p||!p.alive){ G.tpAim=null; return; }
+  const x=Math.round(clamp(t.x,50,W-50));
+  const y=Math.round(clamp(t.y,40,groundY(x)));
+  G.tpAim=null;
+  if(G.mode==='online') NET.send({t:'item',pi:p.id,kind:'tp',x,y});
+  applyItem(p.id,'tp',x,y);
+}
+function cancelTp(){ G.tpAim=null; toast('Teleport cancelled'); }
+function toggleChute(){
+  const p=localControl(); if(!p) return;
+  p.chuteEnabled=!p.chuteEnabled;
+  toast(p.chuteEnabled?'🪂 Parachute armed':'🪂 Parachute OFF — falls hurt (and crush!)', p.chuteEnabled?'#7fb069':'#e3b64f');
+  if(G.mode==='online') NET.send({t:'chute',pi:p.id,on:p.chuteEnabled});
+  updateHUD();
 }
 function anyMotion(){
   return G.proj.length>0 || G.plane || G.players.some(t=>t.alive&&t.falling);
@@ -871,6 +945,38 @@ function drawAimPreview(p){
   }
   ctx.globalAlpha=1;
 }
+function drawTpAim(){
+  const t=G.tpAim, p=G.players[t.pi]; if(!p) return;
+  const gy=groundY(t.x), voidCol=gy>H;
+  // drop line to projected landing
+  ctx.setLineDash([5,6]); ctx.lineWidth=1.6;
+  ctx.strokeStyle = voidCol? 'rgba(255,107,107,.9)' : 'rgba(159,232,255,.85)';
+  ctx.beginPath(); ctx.moveTo(t.x,t.y); ctx.lineTo(t.x,Math.min(gy,H)); ctx.stroke();
+  ctx.setLineDash([]);
+  if(!voidCol){ ctx.strokeStyle='rgba(159,232,255,.7)'; ctx.beginPath(); ctx.moveTo(t.x-16,gy); ctx.lineTo(t.x+16,gy); ctx.stroke(); }
+  // ghost tank at the warp-in point
+  ctx.globalAlpha=0.55;
+  ctx.fillStyle= voidCol? '#ff6b6b':'#9fe8ff';
+  roundRect(t.x-15,t.y-13,30,11,4); ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.strokeStyle= voidCol? '#ff9a9a':'#dff6ff'; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.arc(t.x,t.y-7,21,0,7); ctx.stroke();
+  // impact forecast
+  const useChute = p.chutes>0 && p.chuteEnabled;
+  const fell = Math.max(0, Math.min(gy,H+600)-t.y);
+  const est = (!useChute && fell>FALL_SAFE)? Math.round((fell-FALL_SAFE)*FALL_DMG) : 0;
+  const victim = G.players.find(v=>v!==p && v.alive && Math.abs(v.x-t.x)<26);
+  let txt;
+  if(voidCol) txt='☠ THE ABYSS';
+  else if(est>0) txt='~'+est+' impact dmg'+(victim? ' → 💥 DROP ON '+victim.name.toUpperCase()+'!':'');
+  else if(useChute && fell>40) txt='🪂 soft landing';
+  else txt='safe landing';
+  ctx.font='bold 14px Segoe UI'; ctx.textAlign='center';
+  ctx.fillStyle = voidCol? '#ff8f8f' : (est>0&&victim? '#e3b64f':'#dff6ff');
+  ctx.fillText('🌀 '+txt, t.x, Math.max(24,t.y-30));
+  ctx.font='11px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.6)';
+  ctx.fillText('click / Space to warp • Esc cancels', t.x, Math.max(38,t.y-14));
+}
 function drawOverlay(){
   // wind gauge
   const cx=W/2, cy=44;
@@ -957,6 +1063,7 @@ function frame(ts){
   if(G.roundActive) for(const t of G.players) if(t.alive) drawTank(t);
   if(G.roundActive){
     if(G.state==='aim'){ const cur=G.players[G.turn]; if(cur.alive && (isMyTurn()||G.mode==='local')) drawAimPreview(cur); }
+    if(G.state==='aim' && G.tpAim) drawTpAim();
     drawProjectiles();
     drawFX();
     drawOverlay();
@@ -979,6 +1086,11 @@ function stepGame(){
     }
   } else if(G.state==='aim'){
     stepTanks();
+    // the current player can die mid-turn (drove off a cliff, ground gave way)
+    if(G.state==='aim' && !G.players[G.turn].alive){
+      if(!checkRoundEnd()) nextTurn();
+      return;
+    }
     const cur=G.players[G.turn];
     // held movement
     if(cur && cur.alive && cur.moveDir && (isMyTurn()||(G.mode==='local'&&!isBot(cur)))) tryMove(cur, cur.moveDir);
@@ -990,11 +1102,14 @@ function stepGame(){
 function applySkip(){ toast('Turn skipped (time up)','#f87171'); nextTurn(); }
 
 function tryMove(p,dir){
-  if(p.fuel<MOVE_COST) return;
+  if(p.fuel<MOVE_COST || p.falling) return;
   const nx=clamp(p.x+dir*MOVE_SPEED, 20, W-20);
-  const dh=groundY(nx)-groundY(p.x); // negative = uphill (screen y smaller)
-  if(dh<-3.4){ return; } // too steep
-  p.x=nx; p.y=groundY(nx); p.fuel-=MOVE_COST*(dh<-1.2?1.6:1);
+  const dh=groundY(nx)-p.y;          // negative = uphill (screen y smaller)
+  if(dh<-3.4){ return; }             // too steep to climb
+  p.x=nx; p.fuel-=MOVE_COST*(dh<-1.2?1.6:1);
+  if(dh<=3.5) p.y=groundY(nx);       // follow gentle slopes
+  // bigger drop: don't snap — stepTanks takes over with real fall physics
+  // (fall damage, parachutes, and the abyss all apply when driving off an edge)
   if(frand()<0.3) particles.push({x:p.x-dir*14,y:p.y,vx:-dir*frange(0.5,1),vy:frange(-1,-0.2),life:frange(12,25),age:0,size:frange(1.5,3),col:'#999',grav:-0.01,fade:true});
   updateHUD();
 }
@@ -1037,8 +1152,12 @@ function updateHUD(){
   if(me){
     $('tpCount').textContent=me.teleports;
     $('rpCount').textContent=me.repairs;
-    $('btnTeleport').disabled = !mine || me.teleports<=0;
+    $('chuteCount').textContent=me.chutes;
+    $('btnTeleport').disabled = !mine || (me.teleports<=0 && !G.tpAim);
+    $('btnTeleport').classList.toggle('aiming', !!G.tpAim);
     $('btnRepair').disabled = !mine || me.repairs<=0 || me.hp>=me.maxHp;
+    $('btnChute').disabled = !mine || me.chutes<=0;
+    $('btnChute').classList.toggle('chuteOff', !me.chuteEnabled);
   }
 }
 function localControl(){ // player object the local user may steer right now
@@ -1052,6 +1171,7 @@ function adjAngle(d){ const p=localControl(); if(!p)return; p.angle=clamp(p.angl
 function adjPower(d){ const p=localControl(); if(!p)return; p.power=clamp(p.power+d,10,100); updateHUD(); netAim(p); }
 function netAim(p){ if(G.mode==='online') NET.send({t:'aim',pi:p.id,a:p.angle,pw:p.power,x:Math.round(p.x),fuel:Math.round(p.fuel)}); }
 function fireLocal(){
+  if(G && G.tpAim) return;          // aiming a teleport, not the gun
   const p=localControl(); if(!p)return;
   const w=$('weaponSel').value||p.weapon;
   if(G.mode==='online'){ NET.send({t:'fire',pi:p.id,w,a:p.angle,pw:p.power,x:Math.round(p.x)}); }
@@ -1071,8 +1191,18 @@ holdable('powUp',()=>adjPower(1)); holdable('powDown',()=>adjPower(-1));
 holdable('movLeft',()=>{const p=localControl(); if(p){tryMove(p,-1); netAim(p);} });
 holdable('movRight',()=>{const p=localControl(); if(p){tryMove(p,1); netAim(p);} });
 $('fireBtn').addEventListener('click',()=>{AudioFX.unlock(); fireLocal();});
-$('btnTeleport').addEventListener('click',()=>{AudioFX.unlock(); useItem('tp');});
+$('btnTeleport').addEventListener('click',()=>{AudioFX.unlock(); useItem('tp'); updateHUD();});
 $('btnRepair').addEventListener('click',()=>{AudioFX.unlock(); useItem('rp');});
+$('btnChute').addEventListener('click',()=>{AudioFX.unlock(); toggleChute();});
+// teleport targeting via mouse on the battlefield
+canvas.addEventListener('mousemove',e=>{
+  if(!G||!G.tpAim) return;
+  const r=canvas.getBoundingClientRect();
+  G.tpAim.x=clamp((e.clientX-r.left)/r.width*W, 50, W-50);
+  G.tpAim.y=clamp((e.clientY-r.top)/r.height*H, 40, H-4);
+});
+canvas.addEventListener('click',()=>{ if(G&&G.tpAim){ AudioFX.unlock(); confirmTp(); updateHUD(); } });
+canvas.addEventListener('contextmenu',e=>{ if(G&&G.tpAim){ e.preventDefault(); cancelTp(); updateHUD(); } });
 $('weaponSel').addEventListener('change',e=>{const p=localControl(); if(p){p.weapon=e.target.value; updateHUD(); }});
 
 // keyboard
@@ -1081,6 +1211,16 @@ window.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   AudioFX.unlock();
   keys[e.code]=true;
+  // teleport targeting intercepts movement/confirm keys
+  if(G && G.tpAim){
+    const step=e.shiftKey?24:8;
+    if(e.code==='ArrowLeft'){ e.preventDefault(); G.tpAim.x=clamp(G.tpAim.x-step,50,W-50); return; }
+    if(e.code==='ArrowRight'){ e.preventDefault(); G.tpAim.x=clamp(G.tpAim.x+step,50,W-50); return; }
+    if(e.code==='ArrowUp'){ e.preventDefault(); G.tpAim.y=clamp(G.tpAim.y-step,40,H-4); return; }
+    if(e.code==='ArrowDown'){ e.preventDefault(); G.tpAim.y=clamp(G.tpAim.y+step,40,H-4); return; }
+    if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); confirmTp(); updateHUD(); return; }
+    if(e.code==='Escape'){ e.preventDefault(); cancelTp(); updateHUD(); return; }
+  }
   const p=localControl();
   if(e.code==='Space'){ e.preventDefault(); fireLocal(); }
   if(p){
@@ -1467,6 +1607,7 @@ const NET = {
   startOnline(){
     const seed=(Math.random()*1e9)|0;
     const cfg={ seed, map:$('selMapOnline').value, rounds:+$('selRoundsOnline').value,
+      loadout:$('selLoadoutOnline').value, dmgMul:+$('selDmgOnline').value, shieldMul:+$('selShieldOnline').value,
       players:this.lobby.map(l=>({name:l.name,type:l.type,peerId:l.peerId})) };
     this.send({t:'start',cfg});
     beginOnlineMatch(cfg);
@@ -1506,7 +1647,8 @@ const NET = {
         if(G.state==='shot'){ this.pendingSync=d; } else applySync(d);
         break; }
       case 'skip': if(!this.isHost) applySkip(); break;
-      case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind,d.x); break;
+      case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind,d.x,d.y); break;
+      case 'chute':{ const p=G&&G.players[d.pi]; if(p){ p.chuteEnabled=!!d.on; } if(this.isHost) this.send(d,conn); break; }
       case 'buy': applyPurchase(d.pi,d.k,d.cat); if(this.isHost) this.send(d,conn); break;
       case 'botinv':{ const p=G&&G.players[d.pi]; if(!p) break;
         Object.assign(p,d.stats);
@@ -1537,7 +1679,8 @@ function applySync(d){
 }
 function beginOnlineMatch(cfg){
   showOnly(null); show('hud');
-  newMatch(cfg.players, {mode:'online', seed:cfg.seed, map:cfg.map, rounds:cfg.rounds, cash:10000});
+  newMatch(cfg.players, {mode:'online', seed:cfg.seed, map:cfg.map, rounds:cfg.rounds, cash:10000,
+    loadout:cfg.loadout||'shop', dmgMul:cfg.dmgMul||1, shieldMul:(cfg.shieldMul==null?1:cfg.shieldMul)});
 }
 
 // online round-end → shop transition (clients follow host via btnNext? host drives)
@@ -1580,7 +1723,8 @@ $('btnStartMatch').onclick=()=>{
   const players=rows.map(r=>({name:r.querySelector('input').value.trim()||'Player',type:r.querySelector('select').value,peerId:null}));
   if(players.length<2){ toast('Need at least 2 players'); return; }
   showOnly(null); show('hud');
-  newMatch(players,{mode:'local', seed:(Math.random()*1e9)|0, map:$('selMap').value, rounds:+$('selRounds').value, cash:+$('selCash').value});
+  newMatch(players,{mode:'local', seed:(Math.random()*1e9)|0, map:$('selMap').value, rounds:+$('selRounds').value,
+    cash:+$('selCash').value, loadout:$('selLoadout').value, dmgMul:+$('selDmg').value, shieldMul:+$('selShield').value});
 };
 
 $('btnVsBots').onclick=()=>{AudioFX.unlock();AudioFX.click(); openSetup('bots');};

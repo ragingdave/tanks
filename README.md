@@ -43,7 +43,11 @@ Missile (free, unlimited) · Big Missile · Shower (splits into 6 at the apex) �
 
 Gear: shields, parachutes, teleporters, repair kits, extra fuel, energy cells (+max HP), composite armor (damage reduction).
 
-Every tank starts the match with one free parachute — it auto-deploys on long falls (like getting the ground blown out from under you) and prevents fall damage. Buy more in the Armory. Teleporters warp you to a random spot and repair kits patch +35 HP; both are used on your turn from the Items buttons in the HUD, and neither ends your turn.
+Every tank starts the match with one free parachute — it auto-deploys on long falls and prevents fall damage, and you can toggle it off from the HUD. Why would you? Drop attacks: teleporters are aimed (mouse or arrow keys) and can warp you *mid-air* — you take fall damage on landing, and any tank you land on takes the same hit. Repair kits patch +35 HP. Items are used on your turn and don't end it.
+
+Terrain is fully destructible — it erodes for real, with no indestructible floor. Dig deep enough and a tank can fall clean through the map: that's an elimination.
+
+Match settings let you tune the game without touching code: damage multiplier, shield multiplier, starting loadouts (Standard kit / Heavy kit / pre-match shop / nothing), rounds, terrain, and starting cash. The host picks them in the lobby for online games.
 
 You earn cash for every point of damage ($15/hp), kills ($2,000), surviving a round ($1,500), and winning it ($5,000).
 
