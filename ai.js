@@ -21,7 +21,13 @@ function botPickTarget(p){
   const foes=alivePlayers().filter(t=>t!==p);
   if(!foes.length) return null;
   if(p.type==='bot-easy') return foes[Math.floor(frand()*foes.length)];
-  // prefer weakest, then nearest
+  // grudge first: whoever last landed a shot near this bot gets the retaliation.
+  // spreads bot fire across the lobby instead of everyone dogpiling one player.
+  if(p.threatId!=null){
+    const th=foes.find(t=>t.id===p.threatId);
+    if(th) return th;
+  }
+  // no grudge yet: prefer weakest, then nearest
   return foes.sort((a,b)=>(a.hp+a.shield)-(b.hp+b.shield) || Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
 }
 function botSearchAim(p,target,samples,refine){

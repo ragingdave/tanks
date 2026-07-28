@@ -13,7 +13,7 @@ const SHOT_DT = 0.55;                 // projectile time-dilation: same arc, slo
 const MAX_PLAYERS = 6;
 const COLORS = ['#d95c4a','#5fa8d3','#7fb069','#d9a441','#a084c9','#c97fa4'];
 const TEAMNAMES = ['Red','Blue','Green','Amber','Violet','Pink'];
-const BASE_HP = 100, BASE_FUEL = 100, MOVE_COST = 2.2, MOVE_SPEED = 1.15;
+const BASE_HP = 100, BASE_FUEL = 100, MOVE_COST = 1.1, MOVE_SPEED = 1.15;
 const FALL_SAFE = 110, FALL_DMG = 0.35;   // fall px before damage, dmg per px
 const TURN_TIME_ONLINE = 60;              // seconds
 
@@ -82,7 +82,6 @@ const WKEYS = Object.keys(WEAPONS), GKEYS = Object.keys(GEAR);
 const RELICS = {
   // ballistics & aim
   windcutter:   {icon:'🌬️', name:'Windcutter',        desc:'Your shells ignore half the wind'},
-  secondopinion:{icon:'🔭', name:'Second Opinion',     desc:'Your trajectory preview shows the full arc'},
   gyrofins:     {icon:'🎯', name:'Gyroscopic Fins',    desc:'Your last impact point stays marked while you aim'},
   doubletap:    {icon:'🔫', name:'Double Tap',         desc:'Once per round, a basic Missile shot doesn\'t end your turn'},
   heavybarrel:  {icon:'🛢️', name:'Heavy Barrel',       desc:'+15% blast radius, but max power capped at 90'},
@@ -114,6 +113,7 @@ const RELICS = {
   laststand:    {icon:'🩸', name:'Last Stand',         desc:'Once per round, a killing blow leaves you at 1 HP'},
   deflector:    {icon:'✨', name:'Deflector Spike',    desc:'15% chance incoming shells skip off you and keep flying'},
   // cursed
+  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you'},
   cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep'},
   glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken'},
   gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal'},

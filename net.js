@@ -138,7 +138,7 @@ const NET = {
       case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind,d.x,d.y); break;
       case 'chute':{ const p=G&&G.players[d.pi]; if(p){ p.chuteEnabled=!!d.on; } if(this.isHost) this.send(d,conn); break; }
       case 'dig': if(this.isHost) this.send(d,conn); applyDig(d.pi); break;
-      case 'relic':{ const p=G&&G.players[d.pi]; if(p && !p.relics.includes(d.k)) p.relics.push(d.k);
+      case 'relic':{ const p=G&&G.players[d.pi]; if(p && d.k && !p.relics.includes(d.k)) p.relics.push(d.k);
         draftReady.add(d.pi); renderIntel(); updateHUD();
         if(this.isHost){ this.send(d,conn); maybeAllDrafted(); } break; }
       case 'draftdone': if(!this.isHost && G && G.state==='draft') openShopPhase(); break;

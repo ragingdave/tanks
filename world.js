@@ -129,7 +129,9 @@ function genClouds(){
 let lastCloudMs=0;
 function drawClouds(){
   const now=performance.now(), night=themeName!=='forest';
-  const dt = lastCloudMs? Math.min(3,(now-lastCloudMs)/16.67) : 1;
+  // Smokescreen: the viewer's sky goes dead still — no wind tell from the clouds
+  const frozen = (typeof fogged==='function') && fogged();
+  const dt = frozen? 0 : (lastCloudMs? Math.min(3,(now-lastCloudMs)/16.67) : 1);
   lastCloudMs=now;
   // clouds ride the wind: direction and speed track the current turn's wind
   const wind = G && G.state!=='idle' ? G.wind : WIND_MAX*0.33;
@@ -139,7 +141,7 @@ function drawClouds(){
     if(c.x > W+250) c.x -= span;
     if(c.x < -250-c.w) c.x += span;
     const x=c.x;
-    const y=c.y + Math.sin(now/1000*0.22+c.phase)*5;
+    const y=c.y + (frozen? Math.sin(c.phase)*5 : Math.sin(now/1000*0.22+c.phase)*5);
     ctx.globalAlpha=c.alpha;
     for(const p of c.puffs){
       const cy2=y+p.dy, sq=p.belly?0.55:0.9;   // belly puff is squashed wide

@@ -10,7 +10,7 @@ function makePlayer(cfg,i){
     cash:0, score:0, kills:0, dmgDealt:0,
     ammo:{missile:Infinity, bigshot:0, shower:0, volcano:0, digger:0, atom:0, strike:0},
     weapon:'missile', alive:true, falling:false, fallStart:0, chuteOn:false,
-    relics:[], rs:{}, lastImpact:null,
+    relics:[], rs:{}, lastImpact:null, threatId:null,
   };
 }
 let G = null;   // match state
@@ -20,9 +20,9 @@ function newMatch(cfgPlayers, opts){
   G = {
     mode:opts.mode,                 // 'local' | 'online'
     players:cfgPlayers.map(makePlayer),
-    round:1, rounds:opts.rounds||3,
+    round:1, rounds:(opts.rounds==null? 3 : +opts.rounds),   // 0 = unlimited
     map:opts.map||'random',
-    turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|over
+    turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|draft|over
     proj:[], pendingBombs:[], turnDeadline:0, shotBy:-1,
     seed:opts.seed, roundActive:false, pendingFirstRound:true, tpAim:null,
     sandbox:!!opts.sandbox, repeatTurn:false,
@@ -50,15 +50,17 @@ function startRound(){
   G.wind = (G.windRng()*2-1)*WIND_MAX*0.6;
   G.roundActive = true;
   const ps=G.players, n=ps.length;
-  // spawn spread across map, deterministic
+  // spawn spread across map — SLOT ASSIGNMENT SHUFFLES EVERY ROUND (deterministic
+  // per-round, same on all clients), so nobody owns a corner all match
   const order=[...ps].sort((a,b)=>a.id-b.id);
+  for(let i=order.length-1;i>0;i--){ const j=Math.floor(rr()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
   const margin=110, span=(W-2*margin)/(n-1||1);
   order.forEach((p,i)=>{
     p.x = Math.round(margin + span*i + rrange(-40,40));
     p.y = groundY(p.x);
     if(p.rs && p.rs.insure){ p.cash+=8000; }          // Life Insurance payout
     p.rs = {};                                        // per-round relic state resets
-    p.lastImpact=null;
+    p.lastImpact=null; p.threatId=null;               // grudges reset each round
     p.hp = p.maxHp;
     let sh = Math.round(p.shieldBuy*G.set.shieldMul);
     if(hasRelic(p,'bunker')) sh=Math.round(sh*1.4);
@@ -227,7 +229,14 @@ function explodeAt(x,y,r,dmg,owner,skipCarve,charged){
     if(hasRelic(sh,'heavybarrel'))    R=Math.round(R*1.15);
     if(hasRelic(sh,'cursedordnance')) D*=1.4;
     if(hasRelic(sh,'glasscannon'))    D*=1.6;
+    if(hasRelic(sh,'fogofwar'))       D*=1.25;         // Smokescreen's upside
     if(charged){ D+=20; }                              // Static Charge
+  }
+  // grudges: anyone with a shell landing near them remembers who fired it
+  if(sh) for(const t of G.players){
+    if(!t.alive || t===sh) continue;
+    const dd=Math.hypot(t.x-x,(t.y-12)-y);
+    if(dd<340) t.threatId=sh.id;
   }
   if(!skipCarve){
     let cr=R;
@@ -260,7 +269,7 @@ function applyDamage(t,amt,shooter){
   if(t.shield>0){ const absorbed=Math.min(t.shield,rem); t.shield-=absorbed; rem-=absorbed;
     if(absorbed>0) floater(t.x,t.y-46,'-'+absorbed+'🛡','#7dd3fc'); }
   if(rem>0){ t.hp-=rem; floater(t.x,t.y-30,'-'+rem, '#ff7b7b'); }
-  if(shooter && shooter!==t){ shooter.dmgDealt+=amt; shooter.cash+=amt*(hasRelic(shooter,'profiteer')?25:15); }
+  if(shooter && shooter!==t){ shooter.dmgDealt+=amt; shooter.cash+=amt*(hasRelic(shooter,'profiteer')?25:15); t.threatId=shooter.id; }
   if(t.hp<=0){
     if(hasRelic(t,'laststand') && t.rs && !t.rs.laststand){   // cling to life, once per round
       t.rs.laststand=true; t.hp=1;

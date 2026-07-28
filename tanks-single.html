@@ -165,7 +165,7 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
             <option value="forest">Forest</option><option value="mountain">Mountain</option>
           </select>
           <label>Rounds</label>
-          <select id="selRounds"><option>1</option><option selected>3</option><option>5</option></select>
+          <select id="selRounds"><option>1</option><option selected>3</option><option>5</option><option value="0">∞ Unlimited</option></select>
         </div>
         <div class="row" id="rowStartCash"><label>Start cash</label>
           <select id="selCash"><option value="0">$0</option><option value="10000" selected>$10,000</option><option value="40000">$40,000</option></select>
@@ -214,7 +214,7 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
                 <option value="forest">Forest</option><option value="mountain">Mountain</option>
               </select>
               <label>Rounds</label>
-              <select id="selRoundsOnline"><option>1</option><option selected>3</option><option>5</option></select>
+              <select id="selRoundsOnline"><option>1</option><option selected>3</option><option>5</option><option value="0">∞ Unlimited</option></select>
             </div>
             <div class="row"><label>Loadout</label>
               <select id="selLoadoutOnline">
@@ -325,7 +325,7 @@ const SHOT_DT = 0.55;                 // projectile time-dilation: same arc, slo
 const MAX_PLAYERS = 6;
 const COLORS = ['#d95c4a','#5fa8d3','#7fb069','#d9a441','#a084c9','#c97fa4'];
 const TEAMNAMES = ['Red','Blue','Green','Amber','Violet','Pink'];
-const BASE_HP = 100, BASE_FUEL = 100, MOVE_COST = 2.2, MOVE_SPEED = 1.15;
+const BASE_HP = 100, BASE_FUEL = 100, MOVE_COST = 1.1, MOVE_SPEED = 1.15;
 const FALL_SAFE = 110, FALL_DMG = 0.35;   // fall px before damage, dmg per px
 const TURN_TIME_ONLINE = 60;              // seconds
 
@@ -394,7 +394,6 @@ const WKEYS = Object.keys(WEAPONS), GKEYS = Object.keys(GEAR);
 const RELICS = {
   // ballistics & aim
   windcutter:   {icon:'🌬️', name:'Windcutter',        desc:'Your shells ignore half the wind'},
-  secondopinion:{icon:'🔭', name:'Second Opinion',     desc:'Your trajectory preview shows the full arc'},
   gyrofins:     {icon:'🎯', name:'Gyroscopic Fins',    desc:'Your last impact point stays marked while you aim'},
   doubletap:    {icon:'🔫', name:'Double Tap',         desc:'Once per round, a basic Missile shot doesn\'t end your turn'},
   heavybarrel:  {icon:'🛢️', name:'Heavy Barrel',       desc:'+15% blast radius, but max power capped at 90'},
@@ -426,6 +425,7 @@ const RELICS = {
   laststand:    {icon:'🩸', name:'Last Stand',         desc:'Once per round, a killing blow leaves you at 1 HP'},
   deflector:    {icon:'✨', name:'Deflector Spike',    desc:'15% chance incoming shells skip off you and keep flying'},
   // cursed
+  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you'},
   cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep'},
   glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken'},
   gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal'},
@@ -572,7 +572,9 @@ function genClouds(){
 let lastCloudMs=0;
 function drawClouds(){
   const now=performance.now(), night=themeName!=='forest';
-  const dt = lastCloudMs? Math.min(3,(now-lastCloudMs)/16.67) : 1;
+  // Smokescreen: the viewer's sky goes dead still — no wind tell from the clouds
+  const frozen = (typeof fogged==='function') && fogged();
+  const dt = frozen? 0 : (lastCloudMs? Math.min(3,(now-lastCloudMs)/16.67) : 1);
   lastCloudMs=now;
   // clouds ride the wind: direction and speed track the current turn's wind
   const wind = G && G.state!=='idle' ? G.wind : WIND_MAX*0.33;
@@ -582,7 +584,7 @@ function drawClouds(){
     if(c.x > W+250) c.x -= span;
     if(c.x < -250-c.w) c.x += span;
     const x=c.x;
-    const y=c.y + Math.sin(now/1000*0.22+c.phase)*5;
+    const y=c.y + (frozen? Math.sin(c.phase)*5 : Math.sin(now/1000*0.22+c.phase)*5);
     ctx.globalAlpha=c.alpha;
     for(const p of c.puffs){
       const cy2=y+p.dy, sq=p.belly?0.55:0.9;   // belly puff is squashed wide
@@ -632,7 +634,7 @@ function makePlayer(cfg,i){
     cash:0, score:0, kills:0, dmgDealt:0,
     ammo:{missile:Infinity, bigshot:0, shower:0, volcano:0, digger:0, atom:0, strike:0},
     weapon:'missile', alive:true, falling:false, fallStart:0, chuteOn:false,
-    relics:[], rs:{}, lastImpact:null,
+    relics:[], rs:{}, lastImpact:null, threatId:null,
   };
 }
 let G = null;   // match state
@@ -642,9 +644,9 @@ function newMatch(cfgPlayers, opts){
   G = {
     mode:opts.mode,                 // 'local' | 'online'
     players:cfgPlayers.map(makePlayer),
-    round:1, rounds:opts.rounds||3,
+    round:1, rounds:(opts.rounds==null? 3 : +opts.rounds),   // 0 = unlimited
     map:opts.map||'random',
-    turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|over
+    turn:-1, wind:0, state:'idle',  // idle|aim|shot|falling|roundend|shop|draft|over
     proj:[], pendingBombs:[], turnDeadline:0, shotBy:-1,
     seed:opts.seed, roundActive:false, pendingFirstRound:true, tpAim:null,
     sandbox:!!opts.sandbox, repeatTurn:false,
@@ -672,15 +674,17 @@ function startRound(){
   G.wind = (G.windRng()*2-1)*WIND_MAX*0.6;
   G.roundActive = true;
   const ps=G.players, n=ps.length;
-  // spawn spread across map, deterministic
+  // spawn spread across map — SLOT ASSIGNMENT SHUFFLES EVERY ROUND (deterministic
+  // per-round, same on all clients), so nobody owns a corner all match
   const order=[...ps].sort((a,b)=>a.id-b.id);
+  for(let i=order.length-1;i>0;i--){ const j=Math.floor(rr()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
   const margin=110, span=(W-2*margin)/(n-1||1);
   order.forEach((p,i)=>{
     p.x = Math.round(margin + span*i + rrange(-40,40));
     p.y = groundY(p.x);
     if(p.rs && p.rs.insure){ p.cash+=8000; }          // Life Insurance payout
     p.rs = {};                                        // per-round relic state resets
-    p.lastImpact=null;
+    p.lastImpact=null; p.threatId=null;               // grudges reset each round
     p.hp = p.maxHp;
     let sh = Math.round(p.shieldBuy*G.set.shieldMul);
     if(hasRelic(p,'bunker')) sh=Math.round(sh*1.4);
@@ -849,7 +853,14 @@ function explodeAt(x,y,r,dmg,owner,skipCarve,charged){
     if(hasRelic(sh,'heavybarrel'))    R=Math.round(R*1.15);
     if(hasRelic(sh,'cursedordnance')) D*=1.4;
     if(hasRelic(sh,'glasscannon'))    D*=1.6;
+    if(hasRelic(sh,'fogofwar'))       D*=1.25;         // Smokescreen's upside
     if(charged){ D+=20; }                              // Static Charge
+  }
+  // grudges: anyone with a shell landing near them remembers who fired it
+  if(sh) for(const t of G.players){
+    if(!t.alive || t===sh) continue;
+    const dd=Math.hypot(t.x-x,(t.y-12)-y);
+    if(dd<340) t.threatId=sh.id;
   }
   if(!skipCarve){
     let cr=R;
@@ -882,7 +893,7 @@ function applyDamage(t,amt,shooter){
   if(t.shield>0){ const absorbed=Math.min(t.shield,rem); t.shield-=absorbed; rem-=absorbed;
     if(absorbed>0) floater(t.x,t.y-46,'-'+absorbed+'🛡','#7dd3fc'); }
   if(rem>0){ t.hp-=rem; floater(t.x,t.y-30,'-'+rem, '#ff7b7b'); }
-  if(shooter && shooter!==t){ shooter.dmgDealt+=amt; shooter.cash+=amt*(hasRelic(shooter,'profiteer')?25:15); }
+  if(shooter && shooter!==t){ shooter.dmgDealt+=amt; shooter.cash+=amt*(hasRelic(shooter,'profiteer')?25:15); t.threatId=shooter.id; }
   if(t.hp<=0){
     if(hasRelic(t,'laststand') && t.rs && !t.rs.laststand){   // cling to life, once per round
       t.rs.laststand=true; t.hp=1;
@@ -1211,18 +1222,24 @@ function drawAimPreview(p){
     ctx.beginPath(); ctx.moveTo(li.x-8,li.y-8); ctx.lineTo(li.x+8,li.y+8);
     ctx.moveTo(li.x+8,li.y-8); ctx.lineTo(li.x-8,li.y+8); ctx.stroke();
   }
-  // dotted trajectory preview (wind included; Windcutter/Second Opinion respected)
+  // dotted trajectory preview (wind included — unless Smokescreen blinds you)
   const wf = hasRelic(p,'windcutter')?0.5:1;
-  const steps = hasRelic(p,'secondopinion')? 400 : 38;
+  const wEff = hasRelic(p,'fogofwar')? 0 : G.wind*wf;   // fogged: preview lies about wind, that's the curse
   const a=p.angle*Math.PI/180, v=powerToV(p.power);
   let x=p.x+Math.cos(a)*26, y=p.y-14-Math.sin(a)*26, vx=Math.cos(a)*v, vy=-Math.sin(a)*v;
   ctx.fillStyle='rgba(255,255,255,.6)';
-  for(let i=0;i<steps;i++){
-    vx+=G.wind*wf; vy+=GRAV; x+=vx; y+=vy;   // same physics as the live shot — dt only changes speed, not the arc
-    if(i%2===0){ ctx.globalAlpha= steps>38? 0.7 : (1-i/46)*0.85; ctx.beginPath(); ctx.arc(x,y,2.6,0,7); ctx.fill(); }
+  for(let i=0;i<38;i++){
+    vx+=wEff; vy+=GRAV; x+=vx; y+=vy;   // same physics as the live shot — dt only changes speed, not the arc
+    if(i%2===0){ ctx.globalAlpha=(1-i/46)*0.85; ctx.beginPath(); ctx.arc(x,y,2.6,0,7); ctx.fill(); }
     if(y>=groundY(x) || x<-100 || x>W+100) break;
   }
   ctx.globalAlpha=1;
+}
+// is the LOCAL viewer wind-blind? (their own Smokescreen curse)
+function fogged(){
+  if(!G || !G.players) return false;
+  const me = G.mode==='online' ? G.players.find(pp=>pp.peerId===NET.myId) : G.players[G.turn];
+  return hasRelic(me,'fogofwar');
 }
 function drawTpAim(){
   const t=G.tpAim, p=G.players[t.pi]; if(!p) return;
@@ -1264,16 +1281,23 @@ function drawOverlay(){
   ctx.strokeStyle='rgba(122,140,72,.5)'; ctx.lineWidth=1; roundRect(cx-130,cy-24,260,48,8); ctx.stroke();
   ctx.fillStyle='#98a37f'; ctx.font='11px Segoe UI'; ctx.textAlign='center';
   ctx.fillText('WIND', cx, cy-9);
-  const wp=G.wind/WIND_MAX; // -1..1
-  ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
-  ctx.fillStyle= Math.abs(wp)>0.55? '#e06c5a' : '#a9c25d';
-  if(wp>=0) ctx.fillRect(cx,cy+2,110*wp,8); else ctx.fillRect(cx+110*wp,cy+2,-110*wp,8);
-  ctx.fillStyle='#fff'; ctx.font='bold 13px Segoe UI';
-  const mph=Math.round(Math.abs(wp)*100);
-  ctx.fillText((wp<0?'◀ ':'')+mph+(wp>0?' ▶':''), cx, cy+24- (wp===0?0:0));
+  if(fogged()){
+    // Smokescreen: the gauge is socked in
+    ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
+    ctx.fillStyle='#98a37f'; ctx.font='bold 13px Segoe UI';
+    ctx.fillText('🌫️ ? ? ?', cx, cy+24);
+  } else {
+    const wp=G.wind/WIND_MAX; // -1..1
+    ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
+    ctx.fillStyle= Math.abs(wp)>0.55? '#e06c5a' : '#a9c25d';
+    if(wp>=0) ctx.fillRect(cx,cy+2,110*wp,8); else ctx.fillRect(cx+110*wp,cy+2,-110*wp,8);
+    ctx.fillStyle='#fff'; ctx.font='bold 13px Segoe UI';
+    const mph=Math.round(Math.abs(wp)*100);
+    ctx.fillText((wp<0?'◀ ':'')+mph+(wp>0?' ▶':''), cx, cy+24);
+  }
   // round / turn banner
   ctx.textAlign='left'; ctx.font='bold 14px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText(G.sandbox? '🧪 SANDBOX' : `Round ${G.round}/${G.rounds}`, 16, 26);
+  ctx.fillText(G.sandbox? '🧪 SANDBOX' : `Round ${G.round}${G.rounds>0?'/'+G.rounds:' ∞'}`, 16, 26);
   const cur=G.players[G.turn];
   if(cur && (G.state==='aim'||G.state==='shot')){
     ctx.fillStyle=cur.color; ctx.fillText(`● ${cur.name}${isBot(cur)?' 🤖':''}`, 16, 48);
@@ -1384,6 +1408,16 @@ function stepGame(){
       if(!checkRoundEnd()) nextTurn();
       return;
     }
+    // live spectating: stream the active player's aim/position so everyone
+    // watches the barrel swing and the tank drive in real time
+    if(G.mode==='online' && isMyTurn()){
+      const p=G.players[G.turn];
+      const now=performance.now();
+      const sig=Math.round(p.angle)+'|'+Math.round(p.power)+'|'+Math.round(p.x);
+      if(!G._aimNet || (now-G._aimNet.t>140 && G._aimNet.sig!==sig)){
+        netAim(p); G._aimNet={t:now,sig};
+      }
+    }
     const cur=G.players[G.turn];
     // held movement
     if(cur && cur.alive && cur.moveDir && (isMyTurn()||(G.mode==='local'&&!isBot(cur)))) tryMove(cur, cur.moveDir);
@@ -1399,9 +1433,11 @@ function tryMove(p,dir){
   const goat=hasRelic(p,'mountaingoat');
   const nx=clamp(p.x+dir*MOVE_SPEED, 20, W-20);
   const dh=groundY(nx)-p.y;          // negative = uphill (screen y smaller)
-  if(dh<-3.4 && !goat){ return; }    // too steep to climb (unless you're a goat)
-  let cost=MOVE_COST*(dh<-1.2?1.6:1);
-  if(goat) cost*=0.5;
+  if(dh<-9 && !goat){ return; }      // only near-vertical walls stop you now
+  // hill climbing: steeper ground burns more fuel instead of blocking outright
+  let cost=MOVE_COST;
+  if(dh<-1.2) cost*=1 + Math.min(3, (-dh-1.2)*0.45);
+  if(goat) cost=MOVE_COST*0.5;
   if(hasRelic(p,'bunker')) cost*=2;
   if(p.fuel<cost) return;
   p.x=nx; p.fuel-=cost;
@@ -1574,7 +1610,7 @@ function roundEnd(winner){
 function showRoundEnd(winner){
   G.state='roundend';
   hide('hud');
-  const last = G.round>=G.rounds;
+  const last = G.rounds>0 && G.round>=G.rounds;
   const winTxt=n=>n.toLowerCase()==='you'?'You win':`${n} wins`;
   $('overTitle').textContent = winner? `🏆 ${winTxt(winner.name)} round ${G.round}!` : `Round ${G.round}: draw!`;
   let html='<table><tr><th>Player</th><th>Rounds won</th><th>Kills</th><th>Damage</th><th>Cash</th></tr>';
@@ -1630,11 +1666,21 @@ function openDraftPhase(){
   if(G.mode==='online'){
     for(const p of G.players) if(p.peerId && !NET.lobby.some(l=>l.peerId===p.peerId)) draftReady.add(p.id);
     const me=G.players.find(p=>p.peerId===NET.myId);
+    // unlimited matches can exhaust the relic pool — auto-skip an empty draft
+    if(me && !draftOptionsFor(me).opts.length){
+      NET.send({t:'relic',pi:me.id,k:null});
+      draftReady.add(me.id);
+      showOnly('draftScreen');
+      $('draftCards').innerHTML='<div class="small" style="grid-column:1/-1;text-align:center;padding:20px">You own every relic. Legend.</div>';
+      show('draftWait');
+      if(NET.isHost) maybeAllDrafted();
+      return;
+    }
     showOnly('draftScreen'); hide('draftWait');
     renderDraft(me);
     if(NET.isHost) maybeAllDrafted();   // covers the everyone-else-is-bots case
   } else {
-    draftQueue=G.players.filter(p=>!isBot(p)); draftIdx=0;
+    draftQueue=G.players.filter(p=>!isBot(p) && draftOptionsFor(p).opts.length>0); draftIdx=0;
     if(!draftQueue.length){ openShopPhase(); return; }
     showOnly('draftScreen'); renderDraft(draftQueue[0]);
   }
@@ -1750,7 +1796,7 @@ function grantPurchase(p,k,catg){   // single source of truth for buys, local an
 function renderShop(p){
   $('shopTitle').innerHTML=`Armory — <span style="color:${p.color}">${p.name}</span>`;
   const next = G.pendingFirstRound ? G.round : G.round+1;
-  $('shopSub').textContent = (G.pendingFirstRound?'Pre-battle loadout — ':'') + `Round ${next} of ${G.rounds} up next`;
+  $('shopSub').textContent = (G.pendingFirstRound?'Pre-battle loadout — ':'') + `Round ${next}${G.rounds>0?' of '+G.rounds:''} up next`;
   $('shopCash').textContent=fmt$(p.cash);
   const bm=bmKeyFor(p), qm=hasRelic(p,'quartermaster');
   const box=$('shopItems'); box.innerHTML='';
@@ -1866,7 +1912,13 @@ function botPickTarget(p){
   const foes=alivePlayers().filter(t=>t!==p);
   if(!foes.length) return null;
   if(p.type==='bot-easy') return foes[Math.floor(frand()*foes.length)];
-  // prefer weakest, then nearest
+  // grudge first: whoever last landed a shot near this bot gets the retaliation.
+  // spreads bot fire across the lobby instead of everyone dogpiling one player.
+  if(p.threatId!=null){
+    const th=foes.find(t=>t.id===p.threatId);
+    if(th) return th;
+  }
+  // no grudge yet: prefer weakest, then nearest
   return foes.sort((a,b)=>(a.hp+a.shield)-(b.hp+b.shield) || Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
 }
 function botSearchAim(p,target,samples,refine){
@@ -2089,7 +2141,7 @@ const NET = {
       case 'item': if(this.isHost) this.send(d,conn); applyItem(d.pi,d.kind,d.x,d.y); break;
       case 'chute':{ const p=G&&G.players[d.pi]; if(p){ p.chuteEnabled=!!d.on; } if(this.isHost) this.send(d,conn); break; }
       case 'dig': if(this.isHost) this.send(d,conn); applyDig(d.pi); break;
-      case 'relic':{ const p=G&&G.players[d.pi]; if(p && !p.relics.includes(d.k)) p.relics.push(d.k);
+      case 'relic':{ const p=G&&G.players[d.pi]; if(p && d.k && !p.relics.includes(d.k)) p.relics.push(d.k);
         draftReady.add(d.pi); renderIntel(); updateHUD();
         if(this.isHost){ this.send(d,conn); maybeAllDrafted(); } break; }
       case 'draftdone': if(!this.isHost && G && G.state==='draft') openShopPhase(); break;

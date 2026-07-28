@@ -92,18 +92,24 @@ function drawAimPreview(p){
     ctx.beginPath(); ctx.moveTo(li.x-8,li.y-8); ctx.lineTo(li.x+8,li.y+8);
     ctx.moveTo(li.x+8,li.y-8); ctx.lineTo(li.x-8,li.y+8); ctx.stroke();
   }
-  // dotted trajectory preview (wind included; Windcutter/Second Opinion respected)
+  // dotted trajectory preview (wind included — unless Smokescreen blinds you)
   const wf = hasRelic(p,'windcutter')?0.5:1;
-  const steps = hasRelic(p,'secondopinion')? 400 : 38;
+  const wEff = hasRelic(p,'fogofwar')? 0 : G.wind*wf;   // fogged: preview lies about wind, that's the curse
   const a=p.angle*Math.PI/180, v=powerToV(p.power);
   let x=p.x+Math.cos(a)*26, y=p.y-14-Math.sin(a)*26, vx=Math.cos(a)*v, vy=-Math.sin(a)*v;
   ctx.fillStyle='rgba(255,255,255,.6)';
-  for(let i=0;i<steps;i++){
-    vx+=G.wind*wf; vy+=GRAV; x+=vx; y+=vy;   // same physics as the live shot — dt only changes speed, not the arc
-    if(i%2===0){ ctx.globalAlpha= steps>38? 0.7 : (1-i/46)*0.85; ctx.beginPath(); ctx.arc(x,y,2.6,0,7); ctx.fill(); }
+  for(let i=0;i<38;i++){
+    vx+=wEff; vy+=GRAV; x+=vx; y+=vy;   // same physics as the live shot — dt only changes speed, not the arc
+    if(i%2===0){ ctx.globalAlpha=(1-i/46)*0.85; ctx.beginPath(); ctx.arc(x,y,2.6,0,7); ctx.fill(); }
     if(y>=groundY(x) || x<-100 || x>W+100) break;
   }
   ctx.globalAlpha=1;
+}
+// is the LOCAL viewer wind-blind? (their own Smokescreen curse)
+function fogged(){
+  if(!G || !G.players) return false;
+  const me = G.mode==='online' ? G.players.find(pp=>pp.peerId===NET.myId) : G.players[G.turn];
+  return hasRelic(me,'fogofwar');
 }
 function drawTpAim(){
   const t=G.tpAim, p=G.players[t.pi]; if(!p) return;
@@ -145,16 +151,23 @@ function drawOverlay(){
   ctx.strokeStyle='rgba(122,140,72,.5)'; ctx.lineWidth=1; roundRect(cx-130,cy-24,260,48,8); ctx.stroke();
   ctx.fillStyle='#98a37f'; ctx.font='11px Segoe UI'; ctx.textAlign='center';
   ctx.fillText('WIND', cx, cy-9);
-  const wp=G.wind/WIND_MAX; // -1..1
-  ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
-  ctx.fillStyle= Math.abs(wp)>0.55? '#e06c5a' : '#a9c25d';
-  if(wp>=0) ctx.fillRect(cx,cy+2,110*wp,8); else ctx.fillRect(cx+110*wp,cy+2,-110*wp,8);
-  ctx.fillStyle='#fff'; ctx.font='bold 13px Segoe UI';
-  const mph=Math.round(Math.abs(wp)*100);
-  ctx.fillText((wp<0?'◀ ':'')+mph+(wp>0?' ▶':''), cx, cy+24- (wp===0?0:0));
+  if(fogged()){
+    // Smokescreen: the gauge is socked in
+    ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
+    ctx.fillStyle='#98a37f'; ctx.font='bold 13px Segoe UI';
+    ctx.fillText('🌫️ ? ? ?', cx, cy+24);
+  } else {
+    const wp=G.wind/WIND_MAX; // -1..1
+    ctx.fillStyle='rgba(255,255,255,.14)'; ctx.fillRect(cx-110,cy+2,220,8);
+    ctx.fillStyle= Math.abs(wp)>0.55? '#e06c5a' : '#a9c25d';
+    if(wp>=0) ctx.fillRect(cx,cy+2,110*wp,8); else ctx.fillRect(cx+110*wp,cy+2,-110*wp,8);
+    ctx.fillStyle='#fff'; ctx.font='bold 13px Segoe UI';
+    const mph=Math.round(Math.abs(wp)*100);
+    ctx.fillText((wp<0?'◀ ':'')+mph+(wp>0?' ▶':''), cx, cy+24);
+  }
   // round / turn banner
   ctx.textAlign='left'; ctx.font='bold 14px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.85)';
-  ctx.fillText(G.sandbox? '🧪 SANDBOX' : `Round ${G.round}/${G.rounds}`, 16, 26);
+  ctx.fillText(G.sandbox? '🧪 SANDBOX' : `Round ${G.round}${G.rounds>0?'/'+G.rounds:' ∞'}`, 16, 26);
   const cur=G.players[G.turn];
   if(cur && (G.state==='aim'||G.state==='shot')){
     ctx.fillStyle=cur.color; ctx.fillText(`● ${cur.name}${isBot(cur)?' 🤖':''}`, 16, 48);
@@ -265,6 +278,16 @@ function stepGame(){
       if(!checkRoundEnd()) nextTurn();
       return;
     }
+    // live spectating: stream the active player's aim/position so everyone
+    // watches the barrel swing and the tank drive in real time
+    if(G.mode==='online' && isMyTurn()){
+      const p=G.players[G.turn];
+      const now=performance.now();
+      const sig=Math.round(p.angle)+'|'+Math.round(p.power)+'|'+Math.round(p.x);
+      if(!G._aimNet || (now-G._aimNet.t>140 && G._aimNet.sig!==sig)){
+        netAim(p); G._aimNet={t:now,sig};
+      }
+    }
     const cur=G.players[G.turn];
     // held movement
     if(cur && cur.alive && cur.moveDir && (isMyTurn()||(G.mode==='local'&&!isBot(cur)))) tryMove(cur, cur.moveDir);
@@ -280,9 +303,11 @@ function tryMove(p,dir){
   const goat=hasRelic(p,'mountaingoat');
   const nx=clamp(p.x+dir*MOVE_SPEED, 20, W-20);
   const dh=groundY(nx)-p.y;          // negative = uphill (screen y smaller)
-  if(dh<-3.4 && !goat){ return; }    // too steep to climb (unless you're a goat)
-  let cost=MOVE_COST*(dh<-1.2?1.6:1);
-  if(goat) cost*=0.5;
+  if(dh<-9 && !goat){ return; }      // only near-vertical walls stop you now
+  // hill climbing: steeper ground burns more fuel instead of blocking outright
+  let cost=MOVE_COST;
+  if(dh<-1.2) cost*=1 + Math.min(3, (-dh-1.2)*0.45);
+  if(goat) cost=MOVE_COST*0.5;
   if(hasRelic(p,'bunker')) cost*=2;
   if(p.fuel<cost) return;
   p.x=nx; p.fuel-=cost;

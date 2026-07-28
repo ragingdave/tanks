@@ -160,7 +160,7 @@ function roundEnd(winner){
 function showRoundEnd(winner){
   G.state='roundend';
   hide('hud');
-  const last = G.round>=G.rounds;
+  const last = G.rounds>0 && G.round>=G.rounds;
   const winTxt=n=>n.toLowerCase()==='you'?'You win':`${n} wins`;
   $('overTitle').textContent = winner? `🏆 ${winTxt(winner.name)} round ${G.round}!` : `Round ${G.round}: draw!`;
   let html='<table><tr><th>Player</th><th>Rounds won</th><th>Kills</th><th>Damage</th><th>Cash</th></tr>';
@@ -216,11 +216,21 @@ function openDraftPhase(){
   if(G.mode==='online'){
     for(const p of G.players) if(p.peerId && !NET.lobby.some(l=>l.peerId===p.peerId)) draftReady.add(p.id);
     const me=G.players.find(p=>p.peerId===NET.myId);
+    // unlimited matches can exhaust the relic pool — auto-skip an empty draft
+    if(me && !draftOptionsFor(me).opts.length){
+      NET.send({t:'relic',pi:me.id,k:null});
+      draftReady.add(me.id);
+      showOnly('draftScreen');
+      $('draftCards').innerHTML='<div class="small" style="grid-column:1/-1;text-align:center;padding:20px">You own every relic. Legend.</div>';
+      show('draftWait');
+      if(NET.isHost) maybeAllDrafted();
+      return;
+    }
     showOnly('draftScreen'); hide('draftWait');
     renderDraft(me);
     if(NET.isHost) maybeAllDrafted();   // covers the everyone-else-is-bots case
   } else {
-    draftQueue=G.players.filter(p=>!isBot(p)); draftIdx=0;
+    draftQueue=G.players.filter(p=>!isBot(p) && draftOptionsFor(p).opts.length>0); draftIdx=0;
     if(!draftQueue.length){ openShopPhase(); return; }
     showOnly('draftScreen'); renderDraft(draftQueue[0]);
   }
@@ -336,7 +346,7 @@ function grantPurchase(p,k,catg){   // single source of truth for buys, local an
 function renderShop(p){
   $('shopTitle').innerHTML=`Armory — <span style="color:${p.color}">${p.name}</span>`;
   const next = G.pendingFirstRound ? G.round : G.round+1;
-  $('shopSub').textContent = (G.pendingFirstRound?'Pre-battle loadout — ':'') + `Round ${next} of ${G.rounds} up next`;
+  $('shopSub').textContent = (G.pendingFirstRound?'Pre-battle loadout — ':'') + `Round ${next}${G.rounds>0?' of '+G.rounds:''} up next`;
   $('shopCash').textContent=fmt$(p.cash);
   const bm=bmKeyFor(p), qm=hasRelic(p,'quartermaster');
   const box=$('shopItems'); box.innerHTML='';
