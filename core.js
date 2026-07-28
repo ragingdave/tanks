@@ -113,13 +113,15 @@ const RELICS = {
   laststand:    {icon:'🩸', name:'Last Stand',         desc:'Once per round, a killing blow leaves you at 1 HP'},
   deflector:    {icon:'✨', name:'Deflector Spike',    desc:'15% chance incoming shells skip off you and keep flying'},
   // cursed
-  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you'},
-  cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep'},
-  glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken'},
-  gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal'},
-  deadmans:     {icon:'💣', name:"Dead Man's Switch",  desc:'On death, you detonate like an atom bomb'},
+  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you', cursed:true},
+  cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep', cursed:true},
+  glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken', cursed:true},
+  gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal', cursed:true},
+  deadmans:     {icon:'💣', name:"Dead Man's Switch",  desc:'On death, you detonate like an atom bomb', cursed:true},
 };
 const RELIC_KEYS = Object.keys(RELICS);
+const CURSE_KEYS = RELIC_KEYS.filter(k=>RELICS[k].cursed);
+const CURSE_LEAD = 3;   // round-wins ahead of everyone → forced curse at the draft
 const hasRelic = (p,k)=> !!(p && p.relics && p.relics.includes(k));
 
 // ---------- Starting loadouts (chosen at match setup) ----------

@@ -192,10 +192,19 @@ function startPostRound(){
 function draftOptionsFor(p){
   // deterministic per (seed, round, player): every client computes identical options
   const rng=mulberry32(((G.seed>>>0) ^ (G.round*31337) ^ ((p.id+1)*9973))>>>0);
+  // the Curse of Success: run away with the match and the battlefield answers.
+  // 3+ round wins ahead of EVERYONE else → no choices, one forced curse.
+  const others=G.players.filter(q=>q!==p);
+  const lead = others.length ? p.score - Math.max(...others.map(q=>q.score)) : 0;
+  if(lead>=CURSE_LEAD){
+    const cursePool=CURSE_KEYS.filter(k=>!p.relics.includes(k));
+    if(cursePool.length)
+      return {opts:[cursePool[Math.floor(rng()*cursePool.length)]], rng, cursed:true, lead};
+  }
   const pool=RELIC_KEYS.filter(k=>!p.relics.includes(k));
   const opts=[];
   while(opts.length<3 && pool.length) opts.push(pool.splice(Math.floor(rng()*pool.length),1)[0]);
-  return {opts,rng};
+  return {opts,rng,cursed:false,lead};
 }
 function openDraftPhase(){
   G.state='draft';
@@ -203,8 +212,12 @@ function openDraftPhase(){
   // bots always auto-pick; in random mode humans do too — deterministic on every client
   for(const p of G.players){
     if(isBot(p) || G.set.draft==='random'){
-      const {opts,rng}=draftOptionsFor(p);
-      if(opts.length) p.relics.push(opts[Math.floor(rng()*opts.length)]);
+      const {opts,rng,cursed}=draftOptionsFor(p);
+      if(opts.length){
+        const k=opts[Math.floor(rng()*opts.length)];
+        p.relics.push(k);
+        if(cursed) toast('☠️ '+p.name+' is too far ahead — CURSED with '+RELICS[k].icon+' '+RELICS[k].name,'#e06c5a');
+      }
       draftReady.add(p.id);
     }
   }
@@ -237,17 +250,29 @@ function openDraftPhase(){
 }
 function renderDraft(p){
   if(!p){ openShopPhase(); return; }
-  $('draftTitle').innerHTML=`Choose a Relic — <span style="color:${p.color}">${p.name}</span>`;
-  $('draftSub').textContent=`Round ${G.round} spoils. Pick one — relics last the whole match, and everyone can see yours.`;
-  const {opts}=draftOptionsFor(p);
+  const {opts,cursed,lead}=draftOptionsFor(p);
   const box=$('draftCards'); box.innerHTML='';
-  opts.forEach(k=>{
-    const r=RELICS[k];
-    const b=document.createElement('button'); b.className='relicCard';
-    b.innerHTML=`<div style="font-size:36px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`;
-    b.onclick=()=>{ AudioFX.click(); pickRelic(p,k); };
+  if(cursed){
+    $('draftTitle').innerHTML=`☠️ THE CURSE OF SUCCESS — <span style="color:${p.color}">${p.name}</span>`;
+    $('draftSub').textContent=`You're ${lead} round wins ahead of everyone. The battlefield doesn't offer choices to tyrants.`;
+    const k=opts[0], r=RELICS[k];
+    const b=document.createElement('button'); b.className='relicCard cursedCard'; b.style.gridColumn='1/-1';
+    b.innerHTML=`<div style="font-size:40px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`+
+      `<div style="color:var(--bad); font-weight:700; margin-top:6px">ACCEPT YOUR CURSE</div>`;
+    b.onclick=()=>{ AudioFX.boom(0.7); pickRelic(p,k); };
     box.appendChild(b);
-  });
+  } else {
+    $('draftTitle').innerHTML=`Choose a Relic — <span style="color:${p.color}">${p.name}</span>`;
+    $('draftSub').textContent=`Round ${G.round} spoils. Pick one — relics last the whole match, and everyone can see yours.`;
+    opts.forEach(k=>{
+      const r=RELICS[k];
+      const b=document.createElement('button'); b.className='relicCard'+(RELICS[k].cursed?' cursedCard':'');
+      b.innerHTML=`<div style="font-size:36px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`+
+        (RELICS[k].cursed?'<div class="small" style="color:var(--bad)">☠️ cursed</div>':'');
+      b.onclick=()=>{ AudioFX.click(); pickRelic(p,k); };
+      box.appendChild(b);
+    });
+  }
   $('draftOwned').innerHTML = p.relics.length? 'Owned: '+p.relics.map(k=>RELICS[k].icon+' '+RELICS[k].name).join(' · ') : '';
 }
 function pickRelic(p,k){

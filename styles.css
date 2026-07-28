@@ -103,6 +103,8 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
   padding:16px 10px; background:#10160a; border:1px solid var(--edge); border-radius:10px; min-height:150px;}
 .relicCard:hover{border-color:var(--acc2); box-shadow:0 0 14px rgba(169,194,93,.18);}
 .relicCard b{font-size:14px;}
+.relicCard.cursedCard{border-color:#8a4a38; background:#160f0a;}
+.relicCard.cursedCard:hover{border-color:var(--bad); box-shadow:0 0 16px rgba(224,108,90,.28);}
 .shopItem.bmRow{border-color:var(--acc); box-shadow:0 0 12px rgba(227,182,79,.16);}
 #intelPanel{position:absolute; top:12px; right:12px; width:320px; max-height:72%; overflow:auto;
   background:rgba(13,17,8,.95); border:1px solid var(--edge); border-radius:10px; padding:12px 14px;

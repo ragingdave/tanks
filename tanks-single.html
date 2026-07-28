@@ -112,6 +112,8 @@ th{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1p
   padding:16px 10px; background:#10160a; border:1px solid var(--edge); border-radius:10px; min-height:150px;}
 .relicCard:hover{border-color:var(--acc2); box-shadow:0 0 14px rgba(169,194,93,.18);}
 .relicCard b{font-size:14px;}
+.relicCard.cursedCard{border-color:#8a4a38; background:#160f0a;}
+.relicCard.cursedCard:hover{border-color:var(--bad); box-shadow:0 0 16px rgba(224,108,90,.28);}
 .shopItem.bmRow{border-color:var(--acc); box-shadow:0 0 12px rgba(227,182,79,.16);}
 #intelPanel{position:absolute; top:12px; right:12px; width:320px; max-height:72%; overflow:auto;
   background:rgba(13,17,8,.95); border:1px solid var(--edge); border-radius:10px; padding:12px 14px;
@@ -425,13 +427,15 @@ const RELICS = {
   laststand:    {icon:'🩸', name:'Last Stand',         desc:'Once per round, a killing blow leaves you at 1 HP'},
   deflector:    {icon:'✨', name:'Deflector Spike',    desc:'15% chance incoming shells skip off you and keep flying'},
   // cursed
-  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you'},
-  cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep'},
-  glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken'},
-  gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal'},
-  deadmans:     {icon:'💣', name:"Dead Man's Switch",  desc:'On death, you detonate like an atom bomb'},
+  fogofwar:     {icon:'🌫️', name:'Smokescreen',        desc:'+25% damage, but you fly blind: no wind gauge, and the clouds go still for you', cursed:true},
+  cursedordnance:{icon:'☠️',name:'Cursed Ordnance',    desc:'+40% damage, but your craters are twice as deep', cursed:true},
+  glasscannon:  {icon:'🍷', name:'Glass Cannon',       desc:'+60% damage dealt, +30% damage taken', cursed:true},
+  gamblersfuse: {icon:'🎲', name:"Gambler's Fuse",     desc:'10% of your shots become a random weapon from the whole arsenal', cursed:true},
+  deadmans:     {icon:'💣', name:"Dead Man's Switch",  desc:'On death, you detonate like an atom bomb', cursed:true},
 };
 const RELIC_KEYS = Object.keys(RELICS);
+const CURSE_KEYS = RELIC_KEYS.filter(k=>RELICS[k].cursed);
+const CURSE_LEAD = 3;   // round-wins ahead of everyone → forced curse at the draft
 const hasRelic = (p,k)=> !!(p && p.relics && p.relics.includes(k));
 
 // ---------- Starting loadouts (chosen at match setup) ----------
@@ -1642,10 +1646,19 @@ function startPostRound(){
 function draftOptionsFor(p){
   // deterministic per (seed, round, player): every client computes identical options
   const rng=mulberry32(((G.seed>>>0) ^ (G.round*31337) ^ ((p.id+1)*9973))>>>0);
+  // the Curse of Success: run away with the match and the battlefield answers.
+  // 3+ round wins ahead of EVERYONE else → no choices, one forced curse.
+  const others=G.players.filter(q=>q!==p);
+  const lead = others.length ? p.score - Math.max(...others.map(q=>q.score)) : 0;
+  if(lead>=CURSE_LEAD){
+    const cursePool=CURSE_KEYS.filter(k=>!p.relics.includes(k));
+    if(cursePool.length)
+      return {opts:[cursePool[Math.floor(rng()*cursePool.length)]], rng, cursed:true, lead};
+  }
   const pool=RELIC_KEYS.filter(k=>!p.relics.includes(k));
   const opts=[];
   while(opts.length<3 && pool.length) opts.push(pool.splice(Math.floor(rng()*pool.length),1)[0]);
-  return {opts,rng};
+  return {opts,rng,cursed:false,lead};
 }
 function openDraftPhase(){
   G.state='draft';
@@ -1653,8 +1666,12 @@ function openDraftPhase(){
   // bots always auto-pick; in random mode humans do too — deterministic on every client
   for(const p of G.players){
     if(isBot(p) || G.set.draft==='random'){
-      const {opts,rng}=draftOptionsFor(p);
-      if(opts.length) p.relics.push(opts[Math.floor(rng()*opts.length)]);
+      const {opts,rng,cursed}=draftOptionsFor(p);
+      if(opts.length){
+        const k=opts[Math.floor(rng()*opts.length)];
+        p.relics.push(k);
+        if(cursed) toast('☠️ '+p.name+' is too far ahead — CURSED with '+RELICS[k].icon+' '+RELICS[k].name,'#e06c5a');
+      }
       draftReady.add(p.id);
     }
   }
@@ -1687,17 +1704,29 @@ function openDraftPhase(){
 }
 function renderDraft(p){
   if(!p){ openShopPhase(); return; }
-  $('draftTitle').innerHTML=`Choose a Relic — <span style="color:${p.color}">${p.name}</span>`;
-  $('draftSub').textContent=`Round ${G.round} spoils. Pick one — relics last the whole match, and everyone can see yours.`;
-  const {opts}=draftOptionsFor(p);
+  const {opts,cursed,lead}=draftOptionsFor(p);
   const box=$('draftCards'); box.innerHTML='';
-  opts.forEach(k=>{
-    const r=RELICS[k];
-    const b=document.createElement('button'); b.className='relicCard';
-    b.innerHTML=`<div style="font-size:36px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`;
-    b.onclick=()=>{ AudioFX.click(); pickRelic(p,k); };
+  if(cursed){
+    $('draftTitle').innerHTML=`☠️ THE CURSE OF SUCCESS — <span style="color:${p.color}">${p.name}</span>`;
+    $('draftSub').textContent=`You're ${lead} round wins ahead of everyone. The battlefield doesn't offer choices to tyrants.`;
+    const k=opts[0], r=RELICS[k];
+    const b=document.createElement('button'); b.className='relicCard cursedCard'; b.style.gridColumn='1/-1';
+    b.innerHTML=`<div style="font-size:40px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`+
+      `<div style="color:var(--bad); font-weight:700; margin-top:6px">ACCEPT YOUR CURSE</div>`;
+    b.onclick=()=>{ AudioFX.boom(0.7); pickRelic(p,k); };
     box.appendChild(b);
-  });
+  } else {
+    $('draftTitle').innerHTML=`Choose a Relic — <span style="color:${p.color}">${p.name}</span>`;
+    $('draftSub').textContent=`Round ${G.round} spoils. Pick one — relics last the whole match, and everyone can see yours.`;
+    opts.forEach(k=>{
+      const r=RELICS[k];
+      const b=document.createElement('button'); b.className='relicCard'+(RELICS[k].cursed?' cursedCard':'');
+      b.innerHTML=`<div style="font-size:36px">${r.icon}</div><b>${r.name}</b><div class="small">${r.desc}</div>`+
+        (RELICS[k].cursed?'<div class="small" style="color:var(--bad)">☠️ cursed</div>':'');
+      b.onclick=()=>{ AudioFX.click(); pickRelic(p,k); };
+      box.appendChild(b);
+    });
+  }
   $('draftOwned').innerHTML = p.relics.length? 'Owned: '+p.relics.map(k=>RELICS[k].icon+' '+RELICS[k].name).join(' · ') : '';
 }
 function pickRelic(p,k){
